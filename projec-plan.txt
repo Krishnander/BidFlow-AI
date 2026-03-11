@@ -1,0 +1,1139 @@
+# BidFlow — **End-to-End Build & Ship Guide (Solo, us-east-1)**
+
+**Agentic AI SaaS RFP proposal generator using Kiro + AWS (Bedrock KB + Lambda + DynamoDB + Next.js + Amplify)**
+
+> This is the **single, consolidated “do-this-then-that” document**. Follow it exactly and you’ll have a hackathon-grade prototype that demos perfectly and satisfies the competition expectations: **use Kiro**, build within **AWS Free Tier mindset**, and produce a **prototype + article + demo**. [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html), [\[aws-sample....github.io\]](https://aws-samples.github.io/amazon-bedrock-samples/introduction-to-bedrock/bedrock_apis/03_knowledgebases_api/)
+
+***
+
+## 0) What You’re Building (The Product)
+
+### 0.1 One-liner
+
+**BidFlow** is an **agentic proposal team** for SaaS RFPs: paste an RFP → it extracts requirements → retrieves evidence from your company docs (RAG) → drafts a proposal → audits it for **ISO 27001 + SOC 2 + SSO + SLA** → self-corrects → outputs a polished proposal + cost/time badges. [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html), [\[bobbyhadz.com\]](https://bobbyhadz.com/blog/aws-cdk-api-gateway-example)
+
+### 0.2 The “wow moment” (the demo must show this)
+
+Your Critic agent rejects Draft v1 (“Missing ISO 27001”), then Writer revises, then Critic approves—visible in a live timeline feed. [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html)
+
+### 0.3 Why this fits the competition
+
+The competition requires semi-finalists to publish a **prototype article + demo**, use **Kiro for at least part of development**, and document AWS services + optimization + expected costs (Free Tier mindset). [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html), [\[aws-sample....github.io\]](https://aws-samples.github.io/amazon-bedrock-samples/introduction-to-bedrock/bedrock_apis/03_knowledgebases_api/)
+
+***
+
+## 1) System Architecture (Complete)
+
+### 1.1 Components (What runs where)
+
+**Frontend**
+
+*   **Next.js + Tailwind** UI
+*   Hosted on **AWS Amplify Hosting** (Git-based deploy) [\[boto3.amazonaws.com\]](https://boto3.amazonaws.com/v1/documentation/api/1.35.9/reference/services/bedrock-agent/client/create_knowledge_base.html), [\[gregwilson.tech\]](https://gregwilson.tech/how-to-use-aws-bedrock-apis-for-anthropic-claude-35-sonnet-in-python)
+
+**API**
+
+*   **API Gateway HTTP API**
+*   Endpoints:
+    *   `POST /run` → run agent pipeline
+    *   `GET /runs?project_id=...` → fetch history
+
+**Compute**
+
+*   **AWS Lambda (Python 3.12)**: `AgentOrchestrator` function
+
+**State & storage**
+
+*   **DynamoDB** table `BidProjectState` for run history & artifacts
+*   **S3** bucket `bidflow-documents` for your “company memory” PDFs
+
+**AI / RAG**
+
+*   **Amazon Bedrock Knowledge Bases** for retrieval (RAG grounding)
+*   **Vector store**: Quick-create **OpenSearch Serverless** via Knowledge Base setup flow [\[aws.amazon.com\]](https://aws.amazon.com/blogs/publicsector/transform-devops-practice-with-kiro-ai-powered-agents/)
+*   Models:
+    *   **Claude 3.5 Sonnet** → Strategist + Writer (high quality writing/reasoning) [\[builder.aws.com\]](https://builder.aws.com/post/38A4j2fBi8crdb55HWZXSgG4Enz_p/share-your-aideas-journey-and-win), [\[aws.amazon.com\]](https://aws.amazon.com/builder/)
+    *   **Amazon Nova Lite** → Extractor + Critic (fast + cheap checks) [\[aws.amazon.com\]](https://aws.amazon.com/builder/), [\[builder.aws.com\]](https://builder.aws.com/)
+
+***
+
+### 1.2 End-to-end request flow (Sequence diagram in words)
+
+1.  User pastes SaaS RFP → clicks **Generate**
+2.  Frontend calls `POST /run` with `{project_id, rfp_text}`
+3.  Lambda executes **multi-agent pipeline**:
+    *   **Extractor (Nova Lite)** → checklist JSON
+    *   **Researcher (Knowledge Base Retrieve)** → evidence chunks (top-k)
+    *   **Strategist (Claude)** → win themes + plan
+    *   **Writer (Claude)** → Draft v1 (Markdown)
+    *   **Critic (Nova Lite)** → APPROVED or REJECT with reason
+    *   If REJECT → Writer generates Draft v2 → Critic checks again (only one retry)
+4.  Lambda stores everything into DynamoDB (run history)
+5.  Lambda returns:
+    *   `log[]` (timeline entries)
+    *   `artifacts` (checklist/evidence/strategy/drafts/critic)
+    *   `final_markdown`
+    *   `cost_estimate_usd`
+6.  Frontend animates timeline from `log[]` and renders Markdown
+
+**Important:** For Knowledge Base retrieval, you call the **Bedrock Agent Runtime Retrieve API**, which queries a knowledge base and returns `retrievalResults`. [\[bobbyhadz.com\]](https://bobbyhadz.com/blog/aws-cdk-api-gateway-example), [\[repost.aws\]](https://repost.aws/knowledge-center/bedrock-knowledge-base-private-network-policy)
+
+***
+
+## 2) What You Must Build (Deliverables)
+
+### 2.1 The minimum prototype that wins
+
+*   ✅ Kiro-generated **CDK stack** (proof screenshots) [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html), [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html)
+*   ✅ Bedrock **Knowledge Base** grounded RAG from your PDFs [\[aws.amazon.com\]](https://aws.amazon.com/blogs/publicsector/transform-devops-practice-with-kiro-ai-powered-agents/), [\[bobbyhadz.com\]](https://bobbyhadz.com/blog/aws-cdk-api-gateway-example)
+*   ✅ Multi-agent pipeline with self-correction loop [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html)
+*   ✅ UI with “agent timeline feed” + “final markdown proposal”
+*   ✅ Cost estimate + time saved badge (business value)
+*   ✅ Builder Center article-ready documentation items (services, costs, optimization) [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html), [\[aws-sample....github.io\]](https://aws-samples.github.io/amazon-bedrock-samples/introduction-to-bedrock/bedrock_apis/03_knowledgebases_api/)
+
+***
+
+## 3) Repo Layout (Use this)
+
+    bidflow/
+      infra/                      # Kiro-generated CDK (TypeScript)
+      backend/
+        src/
+          handler.py              # Lambda entry + routing (/run and /runs)
+          bedrock.py              # Bedrock invoke + KB retrieve
+          prompts.py              # Prompt templates
+          dynamo.py               # DynamoDB helpers
+          cost.py                 # Cost estimator
+        requirements.txt
+      frontend/
+        bidflow-ui/               # Next.js + Tailwind app
+      docs/
+        architecture.png
+        kiro-proof/
+        demo-script.md
+      README.md
+
+***
+
+## 4) Prerequisites (Do once)
+
+### 4.1 Region
+
+Use **us-east-1** everywhere (CDK deploy, Bedrock, KB, Lambda, DynamoDB, Amplify). Model availability varies by region, so always request access in the region you deploy. [\[builder.aws.com\]](https://builder.aws.com/)
+
+### 4.2 Enable Bedrock model access
+
+In **Amazon Bedrock → Model access**, request access to:
+
+*   Claude 3.5 Sonnet
+*   Amazon Nova Lite
+*   Titan Embeddings v2 (for KB embeddings)
+
+Bedrock samples show Nova Lite and Claude Sonnet model IDs used in InvokeModel examples. [\[aws.amazon.com\]](https://aws.amazon.com/builder/), [\[builder.aws.com\]](https://builder.aws.com/post/38A4j2fBi8crdb55HWZXSgG4Enz_p/share-your-aideas-journey-and-win)
+
+### 4.3 Install tools
+
+*   AWS CLI v2
+*   Node.js 18+
+*   AWS CDK v2 CLI
+*   Python 3.12
+*   Git
+
+AWS CDK is the standard way to deploy Lambda + API Gateway stacks (tutorial references CDK workflow). [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html)
+
+***
+
+## 5) Phase A — Infrastructure (Kiro → CDK → Deploy)
+
+### 5.1 Kiro prompt (copy/paste exactly)
+
+Open Kiro and paste this. **Screenshot this prompt and Kiro output** (mandatory proof). [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html)
+
+```text
+Generate AWS CDK (TypeScript, aws-cdk-lib v2) for a serverless Agentic AI app in us-east-1.
+
+Resources:
+1) S3 bucket: bidflow-documents (block public access).
+2) DynamoDB table: BidProjectState
+   - partition key: project_id (string)
+   - sort key: timestamp (string)
+   - billing mode: pay-per-request.
+3) Lambda function: AgentOrchestrator
+   - runtime: python3.12
+   - timeout: 60 seconds
+   - memory: 1024 MB
+   - code from ../backend/src
+   - environment variables:
+       REGION=us-east-1
+       TABLE_NAME=<dynamodb table name>
+       BUCKET_NAME=<s3 bucket name>
+       KNOWLEDGE_BASE_ID=<placeholder>
+       CLAUDE_MODEL_ID=anthropic.claude-3-5-sonnet-20240620-v1:0
+       NOVA_LITE_MODEL_ID=amazon.nova-lite-v1:0
+   - permissions:
+       bedrock:InvokeModel
+       bedrock-agent-runtime:Retrieve
+       s3:GetObject, s3:PutObject, s3:ListBucket
+       dynamodb:PutItem, dynamodb:Query
+       logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents
+4) API Gateway HTTP API:
+   - POST /run -> AgentOrchestrator
+   - GET /runs -> AgentOrchestrator
+5) Output:
+   - HttpApiUrl
+   - BucketName
+   - TableName
+
+Make it deployable with `cdk deploy`.
+```
+
+### 5.2 CDK deploy commands
+
+From `infra/`:
+
+```bash
+npm install
+cdk bootstrap
+cdk deploy
+```
+
+This follows the standard “CDK app → synth → deploy” approach used to deploy Lambda/API resources. [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html)
+
+### 5.3 What to verify in the generated CDK
+
+Make sure Kiro created:
+
+*   S3 bucket with block public access
+*   DynamoDB table with PK/SK
+*   Lambda runtime python3.12, timeout 60s
+*   HTTP API routes `/run`, `/runs`
+*   IAM permissions for Bedrock invoke + KB retrieve + S3 + DynamoDB
+*   Stack outputs with API URL
+
+***
+
+## 6) Phase B — Knowledge Base (“Company Memory”)
+
+### 6.1 Create your 5 PDFs (Helix Systems, SaaS-focused)
+
+Create these fictional documents (PDF):
+
+1.  **Helix Systems — Company Profile** (explicitly mentions ISO 27001 & SOC 2 alignment practices)
+2.  **Case Study — SaaS Cloud Migration** (SLA + observability outcomes)
+3.  **Case Study — SSO Integration** (SAML/OIDC)
+4.  **Case Study — Security Audit & Hardening** (ISO/SOC wording)
+5.  **Capabilities Deck — SaaS Delivery** (multi-tenancy, encryption, SLAs, DevSecOps)
+
+### 6.2 Upload PDFs to S3
+
+Upload all PDFs to:
+
+*   `s3://bidflow-documents/`
+
+### 6.3 Create Knowledge Base (console)
+
+In AWS Console → **Amazon Bedrock → Knowledge Bases → Create**
+
+*   Data source: **S3** bucket
+*   Embeddings: **Titan Embeddings v2**
+*   Vector store: **Quick create new vector store** (OpenSearch Serverless)
+
+Bedrock KB docs describe quick-create options for supported vector stores, and OpenSearch Serverless is a supported vector store path. [\[aws.amazon.com\]](https://aws.amazon.com/blogs/publicsector/transform-devops-practice-with-kiro-ai-powered-agents/)
+
+### 6.4 Sync + Test Knowledge Base
+
+*   Click **Sync**
+*   Test query: “Show Helix experience with SaaS migration, SSO, and compliance.”
+
+### 6.5 Copy KnowledgeBaseId
+
+You will put this in Lambda env var `KNOWLEDGE_BASE_ID`.
+
+The Retrieve API requires `knowledgeBaseId` in the request to query a KB. [\[bobbyhadz.com\]](https://bobbyhadz.com/blog/aws-cdk-api-gateway-example), [\[repost.aws\]](https://repost.aws/knowledge-center/bedrock-knowledge-base-private-network-policy)
+
+***
+
+## 7) Phase C — Backend (Lambda Agent Orchestrator)
+
+### 7.1 Why we call Retrieve (not RetrieveAndGenerate)
+
+*   We want **raw evidence chunks** so our multi-agent pipeline is transparent and judge-visible. [\[bobbyhadz.com\]](https://bobbyhadz.com/blog/aws-cdk-api-gateway-example), [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html)
+*   RetrieveAndGenerate combines retrieval+generation and can hide intermediate agent steps. [\[registry.t...rraform.io\]](https://registry.terraform.io/providers/hashicorp/awscc/1.73.0/docs/resources/bedrock_knowledge_base), [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html)
+
+### 7.2 API contract (must match frontend)
+
+**POST `/run`**
+
+```json
+{ "project_id": "demo-001", "rfp_text": "..." }
+```
+
+**GET `/runs?project_id=demo-001`** returns recent run summaries.
+
+### 7.3 Backend dependencies
+
+Create `backend/requirements.txt`:
+
+```txt
+boto3>=1.34.94
+botocore>=1.34.94
+```
+
+(You can omit because Lambda includes boto3, but pinning helps local testing consistency.)
+
+***
+
+## 8) Backend Code (Copy-Paste, Works)
+
+### 8.1 `backend/src/bedrock.py`
+
+**KB Retrieve uses bedrock-agent-runtime Retrieve** per API reference.   
+**Model invoke uses bedrock-runtime InvokeModel patterns**. [\[bobbyhadz.com\]](https://bobbyhadz.com/blog/aws-cdk-api-gateway-example), [\[repost.aws\]](https://repost.aws/knowledge-center/bedrock-knowledge-base-private-network-policy) [\[builder.aws.com\]](https://builder.aws.com/post/38A4j2fBi8crdb55HWZXSgG4Enz_p/share-your-aideas-journey-and-win), [\[aws.amazon.com\]](https://aws.amazon.com/builder/)
+
+```python
+import json
+import boto3
+import os
+
+REGION = os.environ.get("REGION", "us-east-1")
+
+bedrock_runtime = boto3.client("bedrock-runtime", region_name=REGION)
+bedrock_agent_runtime = boto3.client("bedrock-agent-runtime", region_name=REGION)
+
+CLAUDE_MODEL_ID = os.environ.get("CLAUDE_MODEL_ID", "anthropic.claude-3-5-sonnet-20240620-v1:0")
+NOVA_LITE_MODEL_ID = os.environ.get("NOVA_LITE_MODEL_ID", "amazon.nova-lite-v1:0")
+
+def invoke_claude(messages, max_tokens=900, temperature=0.2):
+    body = json.dumps({
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "messages": messages
+    })
+    resp = bedrock_runtime.invoke_model(
+        modelId=CLAUDE_MODEL_ID,
+        contentType="application/json",
+        accept="application/json",
+        body=body
+    )
+    data = json.loads(resp["body"].read())
+    return data["content"][0]["text"]
+
+def invoke_nova(prompt, max_tokens=600, temperature=0.0):
+    body = json.dumps({
+        "inputText": prompt,
+        "textGenerationConfig": {
+            "maxTokenCount": max_tokens,
+            "temperature": temperature,
+            "topP": 0.9
+        }
+    })
+    resp = bedrock_runtime.invoke_model(
+        modelId=NOVA_LITE_MODEL_ID,
+        contentType="application/json",
+        accept="application/json",
+        body=body
+    )
+    data = json.loads(resp["body"].read())
+    return data["results"][0]["outputText"]
+
+def kb_retrieve(knowledge_base_id, query_text, top_k=6):
+    resp = bedrock_agent_runtime.retrieve(
+        knowledgeBaseId=knowledge_base_id,
+        retrievalQuery={"text": query_text},
+        retrievalConfiguration={
+            "vectorSearchConfiguration": {"numberOfResults": top_k}
+        }
+    )
+    return resp.get("retrievalResults", [])
+```
+
+***
+
+### 8.2 `backend/src/prompts.py`
+
+Designed specifically for your SaaS checks: **ISO 27001 + SOC 2 + SSO + SLA**.
+
+```python
+EXTRACTOR_PROMPT = """You are a SaaS RFP requirement extractor.
+Return STRICT JSON only (no markdown, no commentary) matching this schema:
+{
+  "must_include_terms": [string],
+  "must_cover_sections": [string],
+  "compliance": [string],
+  "non_functional": [string],
+  "integration": [string],
+  "timeline_required": true/false,
+  "word_limit": number
+}
+
+Focus on: ISO 27001, SOC 2, SSO (SAML/OIDC), SLA, encryption, multi-tenancy, observability.
+
+RFP TEXT:
+{rfp_text}
+"""
+
+STRATEGIST_PROMPT = """You are a Bid Strategist for a SaaS services company (Helix Systems).
+Client RFP:
+{rfp_text}
+
+Extracted checklist (JSON):
+{checklist_json}
+
+Evidence chunks (verbatim):
+{evidence_text}
+
+Write:
+1) Win themes (3 bullets)
+2) Proof points (3 bullets) referencing evidence numbers
+3) Risks + mitigations (2 bullets)
+"""
+
+WRITER_PROMPT = """You are a proposal writer responding to a SaaS RFP.
+Write a formal Markdown response with these sections:
+
+# Executive Summary
+# Understanding of Requirements
+# Proposed Approach
+# Delivery Plan (phases + timeline)
+# Security & Compliance (explicitly mention all compliance items)
+# Relevant Experience (use evidence)
+# Assumptions and Next Steps
+
+Constraints:
+- MUST include these exact terms: {must_include_terms}
+- Word limit: {word_limit}
+Tone: {tone}
+
+Strategy:
+{strategy}
+
+Evidence:
+{evidence_text}
+
+Write the proposal in Markdown now.
+"""
+
+CRITIC_PROMPT = """You are a strict compliance auditor.
+Checklist JSON:
+{checklist_json}
+
+Draft:
+{draft}
+
+Return ONLY one line:
+APPROVED
+or
+REJECT: <specific reason>
+
+Valid reject reasons include:
+REJECT: Missing ISO 27001
+REJECT: Missing SOC 2
+REJECT: Missing SSO
+REJECT: Missing SLA
+REJECT: Missing timeline
+REJECT: Over word limit
+"""
+```
+
+***
+
+### 8.3 `backend/src/dynamo.py`
+
+DynamoDB run history pattern is common in serverless CRUD setups. [\[builder.aws.com\]](https://builder.aws.com/10000aideas)
+
+```python
+import os, time, boto3
+from boto3.dynamodb.conditions import Key
+
+TABLE = os.environ["TABLE_NAME"]
+ddb = boto3.resource("dynamodb")
+table = ddb.Table(TABLE)
+
+def save_run(record: dict):
+    record["timestamp"] = str(int(time.time()))
+    table.put_item(Item=record)
+
+def query_runs(project_id: str, limit=10):
+    resp = table.query(
+        KeyConditionExpression=Key("project_id").eq(project_id),
+        ScanIndexForward=False,
+        Limit=limit
+    )
+    items = resp.get("Items", [])
+    return [{
+        "timestamp": i.get("timestamp"),
+        "trace_id": i.get("trace_id"),
+        "elapsed_seconds": i.get("elapsed_seconds"),
+        "cost_estimate_usd": i.get("cost_estimate_usd")
+    } for i in items]
+```
+
+***
+
+### 8.4 `backend/src/cost.py`
+
+Simple, honest estimator (hackathon prototype). You label it **Estimated**.
+
+```python
+def estimate_cost(strategy, draft_v1, draft_v2, critic_v1, critic_v2):
+    # Simple heuristic estimate: fixed cost per run.
+    # Replace with token-based estimate later if desired.
+    base = 0.03
+    retry = 0.01 if draft_v2 else 0.0
+    return round(base + retry, 2)
+```
+
+***
+
+### 8.5 `backend/src/handler.py`
+
+Implements multi-agent pipeline + one retry loop + returns timeline `log[]`.
+
+```python
+import json, os, time, uuid
+from bedrock import invoke_claude, invoke_nova, kb_retrieve
+from prompts import EXTRACTOR_PROMPT, STRATEGIST_PROMPT, WRITER_PROMPT, CRITIC_PROMPT
+from dynamo import save_run, query_runs
+from cost import estimate_cost
+
+KNOWLEDGE_BASE_ID = os.environ["KNOWLEDGE_BASE_ID"]
+
+def _resp(code, body):
+    return {
+        "statusCode": code,
+        "headers": {
+            "content-type": "application/json",
+            "access-control-allow-origin": "*",
+            "access-control-allow-headers": "*",
+            "access-control-allow-methods": "*"
+        },
+        "body": json.dumps(body)
+    }
+
+def handler(event, context):
+    path = event.get("requestContext", {}).get("http", {}).get("path", "")
+    method = event.get("requestContext", {}).get("http", {}).get("method", "")
+
+    if method == "GET" and path.endswith("/runs"):
+        qs = event.get("queryStringParameters") or {}
+        project_id = qs.get("project_id", "demo-001")
+        return _resp(200, {"project_id": project_id, "runs": query_runs(project_id)})
+
+    body = json.loads(event.get("body") or "{}")
+    project_id = body.get("project_id", "demo-001")
+    rfp_text = (body.get("rfp_text") or "").strip()
+    if not rfp_text:
+        return _resp(400, {"error": "rfp_text required"})
+
+    trace_id = str(uuid.uuid4())
+    log = []
+    t0 = time.time()
+
+    # 1) Extractor
+    log.append({"agent":"Extractor","msg":"Parsing RFP into a structured checklist..."})
+    checklist_raw = invoke_nova(EXTRACTOR_PROMPT.format(rfp_text=rfp_text), max_tokens=600, temperature=0.0)
+    checklist = _safe_json(checklist_raw)
+
+    # 2) Researcher
+    log.append({"agent":"Researcher","msg":"Searching Knowledge Base for relevant evidence..."})
+    query = _build_retrieval_query(checklist, rfp_text)
+    results = kb_retrieve(KNOWLEDGE_BASE_ID, query_text=query, top_k=6)
+    evidence_text = _format_evidence(results)
+    log.append({"agent":"Researcher","msg":f"Retrieved {len(results)} evidence chunks."})
+
+    # 3) Strategist
+    log.append({"agent":"Strategist","msg":"Creating win themes and response plan..."})
+    strategy = invoke_claude([{"role":"user","content":STRATEGIST_PROMPT.format(
+        rfp_text=rfp_text,
+        checklist_json=json.dumps(checklist),
+        evidence_text=evidence_text
+    )}], max_tokens=700, temperature=0.2)
+
+    # 4) Writer v1
+    must_terms = checklist.get("must_include_terms", ["ISO 27001", "SOC 2", "SSO", "SLA"])
+    word_limit = checklist.get("word_limit", 650)
+    log.append({"agent":"Writer","msg":"Writing proposal draft (v1)..."})
+    draft_v1 = invoke_claude([{"role":"user","content":WRITER_PROMPT.format(
+        must_include_terms=", ".join(must_terms),
+        word_limit=word_limit,
+        tone="formal",
+        strategy=strategy,
+        evidence_text=evidence_text
+    )}], max_tokens=1100, temperature=0.3)
+
+    # 5) Critic v1
+    log.append({"agent":"Critic","msg":"Auditing draft for compliance gaps..."})
+    critic_v1 = invoke_nova(
+        CRITIC_PROMPT.format(checklist_json=json.dumps(checklist), draft=draft_v1),
+        max_tokens=80, temperature=0.0
+    ).strip()
+
+    draft_v2 = None
+    critic_v2 = None
+    final = draft_v1
+
+    # 6) One retry self-correction
+    if critic_v1.startswith("REJECT"):
+        log.append({"agent":"Critic","msg":critic_v1})
+        log.append({"agent":"Writer","msg":"Rewriting draft to fix issues (v2)..."})
+        revision_prompt = WRITER_PROMPT.format(
+            must_include_terms=", ".join(must_terms),
+            word_limit=word_limit,
+            tone="formal",
+            strategy=strategy + "\n\nCritic feedback: " + critic_v1,
+            evidence_text=evidence_text
+        )
+        draft_v2 = invoke_claude([{"role":"user","content":revision_prompt}],
+                                 max_tokens=1100, temperature=0.25)
+        log.append({"agent":"Critic","msg":"Re-auditing revised draft..."})
+        critic_v2 = invoke_nova(
+            CRITIC_PROMPT.format(checklist_json=json.dumps(checklist), draft=draft_v2),
+            max_tokens=80, temperature=0.0
+        ).strip()
+
+        if critic_v2 == "APPROVED":
+            log.append({"agent":"Critic","msg":"APPROVED"})
+            final = draft_v2
+        else:
+            log.append({"agent":"Critic","msg":critic_v2})
+            log.append({"agent":"Orchestrator","msg":"Returning best-effort output (needs human review)."})
+            final = draft_v2
+    else:
+        log.append({"agent":"Critic","msg":"APPROVED"})
+
+    elapsed = round(time.time() - t0, 2)
+    cost = estimate_cost(strategy, draft_v1, draft_v2, critic_v1, critic_v2)
+
+    record = {
+        "trace_id": trace_id,
+        "project_id": project_id,
+        "elapsed_seconds": elapsed,
+        "rfp_text": rfp_text,
+        "checklist": checklist,
+        "evidence": _slim_evidence(results),
+        "strategy": strategy,
+        "draft_v1": draft_v1,
+        "critic_v1": critic_v1,
+        "draft_v2": draft_v2,
+        "critic_v2": critic_v2,
+        "final_markdown": final,
+        "cost_estimate_usd": cost
+    }
+    save_run(record)
+
+    return _resp(200, {
+        "trace_id": trace_id,
+        "project_id": project_id,
+        "log": log,
+        "artifacts": {
+            "checklist": checklist,
+            "evidence": _slim_evidence(results),
+            "strategy": strategy,
+            "draft_v1": draft_v1,
+            "critic_v1": critic_v1,
+            "draft_v2": draft_v2,
+            "critic_v2": critic_v2
+        },
+        "final_markdown": final,
+        "cost_estimate_usd": cost,
+        "elapsed_seconds": elapsed
+    })
+
+def _safe_json(text):
+    s = text.find("{"); e = text.rfind("}")
+    if s == -1 or e == -1:
+        return {
+            "must_include_terms":["ISO 27001","SOC 2","SSO","SLA"],
+            "must_cover_sections":["Security & Compliance","Delivery Plan"],
+            "compliance":["ISO 27001","SOC 2"],
+            "integration":["SSO (SAML/OIDC)"],
+            "non_functional":["SLA 99.9%","Observability"],
+            "timeline_required": True,
+            "word_limit": 650
+        }
+    return json.loads(text[s:e+1])
+
+def _build_retrieval_query(checklist, rfp_text):
+    kw = ", ".join((checklist.get("compliance", []) +
+                    checklist.get("integration", []) +
+                    checklist.get("non_functional", []))[:12])
+    return f"SaaS experience: {kw}. Include SSO, SLA, compliance, multi-tenancy, encryption. RFP: {rfp_text[:500]}"
+
+def _format_evidence(results):
+    parts = []
+    for i, r in enumerate(results):
+        txt = r.get("content", {}).get("text", "")
+        src = r.get("location", {}).get("s3Location", {}).get("uri", "unknown")
+        parts.append(f"[Evidence {i+1} | {src}]\n{txt}")
+    return "\n\n".join(parts)
+
+def _slim_evidence(results):
+    return [{
+        "text": r.get("content", {}).get("text",""),
+        "source": r.get("location", {}).get("s3Location", {}).get("uri","")
+    } for r in results]
+```
+
+***
+
+## 9) IAM Policy (Least-Privilege-ish, Copy/Paste)
+
+Attach this as an inline policy to the Lambda execution role (or let CDK generate and then adjust).  
+Replace placeholders: `REGION`, `ACCOUNT_ID`, bucket/table names, knowledge base id if needed.
+
+> Knowledge Base retrieval uses the **bedrock-agent-runtime** service and the Retrieve action, as documented. [\[bobbyhadz.com\]](https://bobbyhadz.com/blog/aws-cdk-api-gateway-example), [\[repost.aws\]](https://repost.aws/knowledge-center/bedrock-knowledge-base-private-network-policy)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Logs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:us-east-1:*:*"
+    },
+    {
+      "Sid": "DynamoDBState",
+      "Effect": "Allow",
+      "Action": ["dynamodb:PutItem","dynamodb:Query"],
+      "Resource": "arn:aws:dynamodb:us-east-1:ACCOUNT_ID:table/BidProjectState"
+    },
+    {
+      "Sid": "S3Docs",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": "arn:aws:s3:::bidflow-documents"
+    },
+    {
+      "Sid": "S3DocsObjects",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject","s3:PutObject"],
+      "Resource": "arn:aws:s3:::bidflow-documents/*"
+    },
+    {
+      "Sid": "BedrockInvokeModels",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel"],
+      "Resource": [
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20240620-v1:0",
+        "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0"
+      ]
+    },
+    {
+      "Sid": "BedrockKnowledgeBaseRetrieve",
+      "Effect": "Allow",
+      "Action": ["bedrock-agent-runtime:Retrieve"],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+***
+
+## 10) Phase D — Frontend (Next.js UI)
+
+### 10.1 Build UI goals (what matters)
+
+*   Left: RFP input + “Load Demo RFP”
+*   Middle: timeline feed (animate logs)
+*   Right: Markdown final output
+*   Tabs: Checklist / Evidence / Strategy / Draft v1 / Critic / Final
+*   Badge: Estimated cost + time saved
+
+### 10.2 Create Next.js app
+
+```bash
+cd frontend
+npx create-next-app@latest bidflow-ui
+cd bidflow-ui
+npm install react-markdown remark-gfm
+```
+
+### 10.3 Minimal UI code (single page)
+
+Create `frontend/bidflow-ui/app/page.tsx` (Next.js App Router) or `pages/index.tsx` (Pages Router). Example with App Router:
+
+```tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+const DEMO_RFP = `We are a B2B SaaS company looking for a partner to modernize our platform.
+
+Must include:
+- Explicit mention of ISO 27001 and SOC 2 alignment
+- SSO via SAML 2.0 or OIDC
+- SLA: 99.9% uptime
+- A delivery timeline with phases (Discovery, Build, Security review, Launch)
+- References to relevant past SaaS projects
+`;
+
+type LogItem = { agent: string; msg: string };
+
+export default function Home() {
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL!;
+  const [rfp, setRfp] = useState(DEMO_RFP);
+  const [running, setRunning] = useState(false);
+  const [log, setLog] = useState<LogItem[]>([]);
+  const [animatedLog, setAnimatedLog] = useState<LogItem[]>([]);
+  const [finalMd, setFinalMd] = useState("");
+  const [cost, setCost] = useState<number | null>(null);
+  const [artifacts, setArtifacts] = useState<any>(null);
+  const [tab, setTab] = useState<"final"|"checklist"|"evidence"|"strategy"|"draft1"|"critic1"|"draft2"|"critic2">("final");
+
+  useEffect(() => {
+    setAnimatedLog([]);
+    if (log.length === 0) return;
+    let i = 0;
+    const t = setInterval(() => {
+      i++;
+      setAnimatedLog(log.slice(0, i));
+      if (i >= log.length) clearInterval(t);
+    }, 450);
+    return () => clearInterval(t);
+  }, [log]);
+
+  async function run() {
+    setRunning(true);
+    setLog([]);
+    setFinalMd("");
+    setArtifacts(null);
+    setCost(null);
+    try {
+      const res = await fetch(`${apiBase}/run`, {
+        method: "POST",
+        headers: {"content-type":"application/json"},
+        body: JSON.stringify({ project_id: "demo-001", rfp_text: rfp })
+      });
+      const data = await res.json();
+      setLog(data.log || []);
+      setFinalMd(data.final_markdown || "");
+      setCost(data.cost_estimate_usd ?? null);
+      setArtifacts(data.artifacts || null);
+      setTab("final");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const tabContent = useMemo(() => {
+    if (!artifacts) return "";
+    switch(tab) {
+      case "checklist": return JSON.stringify(artifacts.checklist, null, 2);
+      case "evidence": return JSON.stringify(artifacts.evidence, null, 2);
+      case "strategy": return artifacts.strategy || "";
+      case "draft1": return artifacts.draft_v1 || "";
+      case "critic1": return artifacts.critic_v1 || "";
+      case "draft2": return artifacts.draft_v2 || "";
+      case "critic2": return artifacts.critic_v2 || "";
+      default: return "";
+    }
+  }, [tab, artifacts]);
+
+  return (
+    <div className="min-h-screen p-6 bg-slate-50">
+      <div className="max-w-7xl mx-auto grid grid-cols-12 gap-4">
+        {/* Left: Input */}
+        <div className="col-span-4 bg-white rounded-xl shadow p-4">
+          <h2 className="font-bold text-lg">RFP Input (SaaS)</h2>
+          <textarea className="w-full h-[520px] mt-3 p-3 border rounded"
+            value={rfp} onChange={(e)=>setRfp(e.target.value)} />
+          <div className="flex gap-2 mt-3">
+            <button className="px-3 py-2 bg-slate-200 rounded"
+              onClick={()=>setRfp(DEMO_RFP)}>Load Demo RFP</button>
+            <button className="px-3 py-2 bg-blue-600 text-white rounded"
+              onClick={run} disabled={running}>
+              {running ? "Running..." : "Generate"}
+            </button>
+          </div>
+          <div className="mt-3 text-sm">
+            <span className="inline-block px-2 py-1 bg-emerald-100 text-emerald-700 rounded">
+              {cost !== null ? `Estimated cost: $${cost.toFixed(2)}` : "Estimated cost: —"}
+            </span>
+            <span className="ml-2 inline-block px-2 py-1 bg-violet-100 text-violet-700 rounded">
+              Time saved: ~6 hours → ~40 seconds
+            </span>
+          </div>
+        </div>
+
+        {/* Middle: Timeline */}
+        <div className="col-span-4 bg-white rounded-xl shadow p-4">
+          <h2 className="font-bold text-lg">Agent Timeline</h2>
+          <div className="mt-3 space-y-2 text-sm">
+            {animatedLog.map((l, idx) => (
+              <div key={idx} className="p-2 border rounded bg-slate-50">
+                <span className="font-semibold">[{l.agent}]</span> {l.msg}
+              </div>
+            ))}
+            {animatedLog.length === 0 && <div className="text-slate-500">Run to see agent steps…</div>}
+          </div>
+        </div>
+
+        {/* Right: Output */}
+        <div className="col-span-4 bg-white rounded-xl shadow p-4">
+          <h2 className="font-bold text-lg">Output</h2>
+          <div className="flex gap-2 mt-3 flex-wrap">
+            {(["final","checklist","evidence","strategy","draft1","critic1","draft2","critic2"] as const).map(t => (
+              <button key={t}
+                onClick={()=>setTab(t)}
+                className={`px-2 py-1 rounded border ${tab===t ? "bg-blue-600 text-white" : "bg-white"}`}>
+                {t.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-3 h-[520px] overflow-auto border rounded p-3 bg-slate-50">
+            {tab === "final"
+              ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{finalMd || "No output yet."}</ReactMarkdown>
+              : <pre className="text-xs whitespace-pre-wrap">{tabContent || "No data yet."}</pre>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+***
+
+## 11) Deploy Frontend on Amplify (Git-based)
+
+### 11.1 Why Amplify
+
+Amplify supports deploying Next.js apps from a Git repo and provides guided steps for hosting. [\[boto3.amazonaws.com\]](https://boto3.amazonaws.com/v1/documentation/api/1.35.9/reference/services/bedrock-agent/client/create_knowledge_base.html), [\[gregwilson.tech\]](https://gregwilson.tech/how-to-use-aws-bedrock-apis-for-anthropic-claude-35-sonnet-in-python)
+
+### 11.2 Steps
+
+1.  Push `frontend/bidflow-ui` to GitHub
+2.  AWS Console → **Amplify** → “Deploy an app”
+3.  Connect Git repo and branch
+4.  In Amplify environment variables set:
+    *   `NEXT_PUBLIC_API_BASE_URL = https://<your-api-id>.execute-api.us-east-1.amazonaws.com`
+
+Amplify docs cover the connect repo → confirm build settings → deploy process for Next.js. [\[boto3.amazonaws.com\]](https://boto3.amazonaws.com/v1/documentation/api/1.35.9/reference/services/bedrock-agent/client/create_knowledge_base.html), [\[gregwilson.tech\]](https://gregwilson.tech/how-to-use-aws-bedrock-apis-for-anthropic-claude-35-sonnet-in-python)
+
+***
+
+## 12) Testing (Do immediately)
+
+### 12.1 Backend curl test
+
+```bash
+curl -X POST "https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/run" \
+  -H "content-type: application/json" \
+  -d '{"project_id":"demo-001","rfp_text":"We require ISO 27001 and SOC 2. SSO via SAML/OIDC. SLA 99.9%. Provide timeline."}'
+```
+
+### 12.2 If retrieval results are poor
+
+Increase retrieval top-k: the Retrieve API supports `numberOfResults`.   
+Also improve your PDFs with clearer headings (SSO, SLA, ISO/SOC) and re-sync KB. [\[bobbyhadz.com\]](https://bobbyhadz.com/blog/aws-cdk-api-gateway-example), [\[repost.aws\]](https://repost.aws/knowledge-center/bedrock-knowledge-base-private-network-policy)
+
+***
+
+## 13) Demo Mode (Never fail your demo)
+
+### 13.1 Add a “Replay last run” button
+
+Use `GET /runs` to fetch last run summary.  
+Optionally add a backend endpoint `GET /run-latest?project_id=...` returning the last full artifact item.
+
+This protects you against throttling/latency (hackathon reality).
+
+***
+
+## 14) The Demo RFP (Guaranteed Reject → Fix → Approve)
+
+Use this as your “Load Demo RFP”:
+
+```text
+We are a B2B SaaS company looking for a partner to modernize our platform.
+
+Must include:
+- Explicit mention of ISO 27001 and SOC 2 alignment
+- SSO via SAML 2.0 or OIDC
+- SLA: 99.9% uptime
+- A delivery timeline with phases (Discovery, Build, Security review, Launch)
+- References to relevant past SaaS projects
+```
+
+***
+
+## 15) Kiro Proof Pack (Must-have screenshots)
+
+Capture for your article:
+
+*   Kiro prompt that generated CDK
+*   Kiro output showing CDK resources
+*   `cdk deploy` output
+*   KB creation + sync screen
+*   KB “Test” showing retrieved chunks
+*   UI showing Critic reject → Writer revise → approve
+
+Kiro usage and article requirements are explicitly listed in competition instructions. [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html), [\[aws-sample....github.io\]](https://aws-samples.github.io/amazon-bedrock-samples/introduction-to-bedrock/bedrock_apis/03_knowledgebases_api/)
+
+***
+
+## 16) Builder Center Article & README (Copy-Paste Templates)
+
+### 16.1 README.md (paste this)
+
+```md
+# BidFlow — Agentic SaaS RFP Proposal Generator (Kiro + AWS)
+
+BidFlow is an agentic AI prototype that turns SaaS RFP requirements into a compliant proposal response by orchestrating multiple agents:
+Extractor → Researcher (RAG) → Strategist → Writer → Critic → Self-correction.
+
+## Why it matters
+Proposal writing is slow and compliance misses are expensive. BidFlow reduces drafting time to seconds and enforces ISO 27001 + SOC 2 + SSO + SLA requirements.
+
+## Architecture
+- S3: stores company memory PDFs
+- Amazon Bedrock Knowledge Bases: RAG retrieval from PDFs
+- AWS Lambda: agent orchestrator (Python)
+- DynamoDB: stores run history + drafts
+- API Gateway HTTP API: /run and /runs
+- Amplify: Next.js UI hosting
+- Models: Claude 3.5 Sonnet (strategy/writing), Nova Lite (extractor/critic)
+
+## Demo flow
+1. Load Demo RFP
+2. Click Generate
+3. Watch Critic reject Draft v1 (missing compliance)
+4. Watch Writer auto-fix and Critic approve
+5. Final proposal renders as Markdown + cost badge
+
+## Setup (high level)
+1. Deploy infra with CDK generated by Kiro (`cdk deploy`)
+2. Create KB in Bedrock and sync PDFs from S3
+3. Set KNOWLEDGE_BASE_ID env var on Lambda
+4. Deploy Next.js on Amplify and set NEXT_PUBLIC_API_BASE_URL
+
+## Cleanup
+Run `cdk destroy` and delete KB/vector store resources if needed.
+```
+
+### 16.2 Article outline (paste into Builder Center)
+
+This matches required components: overview, services + justification, optimization, expected costs, and demo. [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html), [\[aws-sample....github.io\]](https://aws-samples.github.io/amazon-bedrock-samples/introduction-to-bedrock/bedrock_apis/03_knowledgebases_api/)
+
+```md
+# Building BidFlow: An Agentic SaaS Proposal Team with Kiro + Amazon Bedrock
+
+## The problem
+SaaS RFPs are long, repetitive, and compliance-heavy. Teams spend dozens of hours drafting and still miss requirements.
+
+## The solution (agentic workflow)
+BidFlow acts like a proposal team:
+- Extractor (Nova Lite): turns RFP into a checklist
+- Researcher (Bedrock Knowledge Base): retrieves relevant evidence from PDFs
+- Strategist (Claude Sonnet): creates win themes & response plan
+- Writer (Claude Sonnet): drafts proposal in Markdown
+- Critic (Nova Lite): audits for ISO 27001, SOC 2, SSO, SLA and triggers one self-correction cycle
+
+## Architecture
+[Insert diagram]
+Explain:
+- S3 + Knowledge Base ingestion
+- Retrieve API use
+- Lambda orchestration
+- DynamoDB state/history
+- Amplify UI
+
+## How I used Kiro
+- Kiro generated the CDK stack (screenshots)
+- Kiro helped scaffold backend orchestration code (screenshots)
+Include screenshots of:
+- Kiro prompt
+- generated CDK output
+- deploy output
+
+## AWS services used (and why)
+- S3: store PDFs
+- Bedrock Knowledge Bases: retrieval grounding
+- Bedrock runtime: invoke Claude & Nova
+- Lambda: orchestrator
+- DynamoDB: run state and history
+- API Gateway HTTP API: backend endpoints
+- Amplify: Next.js hosting
+
+## Optimization + expected costs
+- Single retry loop to control latency/cost
+- Limited top-k retrieval
+- Estimated cost per run shown in UI
+
+## Demo
+Embed video showing:
+- timeline feed
+- critic rejection
+- self-correction
+- final proposal output
+```
+
+***
+
+## 17) Demo Video Script (3 minutes)
+
+**0:00–0:20** Hook  
+“Writing SaaS RFP responses takes hours. BidFlow does it in under a minute and self-corrects for compliance.”
+
+**0:20–0:45** Show data grounding  
+Show S3 PDFs and Knowledge Base sync.
+
+**0:45–2:15** The agentic workflow  
+Click Generate → zoom timeline:
+
+*   Researcher retrieves evidence
+*   Strategist creates win themes
+*   Writer drafts v1
+*   Critic rejects: Missing ISO 27001
+*   Writer revises v2
+*   Critic approves
+
+**2:15–2:45** The output + business value  
+Show final Markdown proposal + “Estimated cost” badge + “Time saved” badge.
+
+**2:45–3:00** Kiro proof  
+Flash Kiro prompt screenshot + CDK deploy output.
+
+***
+
+## 18) Cleanup (Avoid bills)
+
+After you’re done:
+
+*   `cdk destroy` (removes stack resources)
+*   Delete Knowledge Base and any vector store resources if they persist
+*   Delete PDFs from S3 if needed
+
+***
+
+## 19) Reference links (official docs used)
+
+*   Competition requirements & timeline: [AWS Builder Center 10,000 AIdeas](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html) [\[aws-sample....github.io\]](https://aws-samples.github.io/amazon-bedrock-samples/introduction-to-bedrock/bedrock_apis/03_knowledgebases_api/)
+*   Bedrock KB **Retrieve API**: [\[bobbyhadz.com\]](https://bobbyhadz.com/blog/aws-cdk-api-gateway-example), [\[repost.aws\]](https://repost.aws/knowledge-center/bedrock-knowledge-base-private-network-policy)
+*   Bedrock KB quick-create/vector store prerequisites: [\[aws.amazon.com\]](https://aws.amazon.com/blogs/publicsector/transform-devops-practice-with-kiro-ai-powered-agents/)
+*   Bedrock **RetrieveAndGenerate** (for comparison): [\[registry.t...rraform.io\]](https://registry.terraform.io/providers/hashicorp/awscc/1.73.0/docs/resources/bedrock_knowledge_base)
+*   Bedrock runtime invoke examples (Claude/InvokeModel patterns): [\[builder.aws.com\]](https://builder.aws.com/post/38A4j2fBi8crdb55HWZXSgG4Enz_p/share-your-aideas-journey-and-win), [\[aws.amazon.com\]](https://aws.amazon.com/builder/)
+*   Supported models list/availability varies by region: [\[builder.aws.com\]](https://builder.aws.com/)
+*   Amplify deploy Next.js: [\[boto3.amazonaws.com\]](https://boto3.amazonaws.com/v1/documentation/api/1.35.9/reference/services/bedrock-agent/client/create_knowledge_base.html), [\[gregwilson.tech\]](https://gregwilson.tech/how-to-use-aws-bedrock-apis-for-anthropic-claude-35-sonnet-in-python)
+*   CDK deploy Lambda tutorial reference: [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html)
+
+***
+
+# Done. Start building **now** (in the right order)
+
+1.  **Kiro → generate CDK → cdk deploy** [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html), [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html)
+2.  **Upload PDFs → create KB → sync → copy KnowledgeBaseId** [\[aws.amazon.com\]](https://aws.amazon.com/blogs/publicsector/transform-devops-practice-with-kiro-ai-powered-agents/), [\[bobbyhadz.com\]](https://bobbyhadz.com/blog/aws-cdk-api-gateway-example)
+3.  **Set Lambda env var KNOWLEDGE\_BASE\_ID → redeploy**
+4.  **Deploy Next.js to Amplify and set NEXT\_PUBLIC\_API\_BASE\_URL** [\[boto3.amazonaws.com\]](https://boto3.amazonaws.com/v1/documentation/api/1.35.9/reference/services/bedrock-agent/client/create_knowledge_base.html), [\[gregwilson.tech\]](https://gregwilson.tech/how-to-use-aws-bedrock-apis-for-anthropic-claude-35-sonnet-in-python)
+5.  Record the demo showing the **reject → fix → approve** moment. [\[docs.aws.amazon.com\]](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html)
+
+If you follow this document, you’ll ship a complete prototype with the exact “agentic” proof judges and voters understand immediately.

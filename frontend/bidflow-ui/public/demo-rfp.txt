@@ -1,0 +1,31 @@
+We are a B2B SaaS company looking for a partner to modernize our platform.
+
+Must include:
+- Explicit mention of ISO 27001 and SOC 2 alignment
+- SSO via SAML 2.0 or OIDC
+- SLA: 99.9% uptime
+- A delivery timeline with phases (Discovery, Build, Security review, Launch)
+- References to relevant past SaaS projects
+
+Background:
+Our current platform serves 500+ enterprise customers across healthcare, finance, and technology sectors. We need to modernize our infrastructure to support multi-tenancy, improve observability, and strengthen our security posture.
+
+Key Requirements:
+1. Cloud-native architecture with containerization
+2. Zero-downtime deployment capabilities
+3. Comprehensive monitoring and alerting
+4. Automated security scanning and compliance reporting
+5. Integration with existing identity providers
+6. Data encryption at rest and in transit
+7. Regular security audits and penetration testing
+8. Disaster recovery and business continuity planning
+
+Timeline:
+We aim to complete this modernization within 6 months, with quarterly milestones for stakeholder review.
+
+Evaluation Criteria:
+- Relevant experience with SaaS platforms
+- Demonstrated expertise in security and compliance
+- Clear delivery methodology and timeline
+- Cost-effectiveness and value proposition
+- References from similar engagements
