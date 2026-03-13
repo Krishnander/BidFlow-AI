@@ -22,46 +22,55 @@ If the Critic rejects, the Writer revises using the feedback, and the Critic re-
 
 ## Architecture
 
+```mermaid
+flowchart TD
+  user[User]
+
+  subgraph delivery[Delivery Layer]
+    cf[CloudFront]
+    web[Frontend\nNext.js 14 static export\nS3-hosted UI]
+  end
+
+  subgraph api[API Layer]
+    gateway[API Gateway HTTP API\nPOST /run\nGET /runs\nGET /runs/{run_id}]
+  end
+
+  subgraph app[Application Layer]
+    lambda[Lambda\nAgentOrchestrator\nPython 3.12]
+
+    subgraph pipeline[Agent Pipeline]
+      extractor[Extractor\nAmazon Nova Lite]
+      researcher[Researcher\nBedrock Knowledge Base]
+      strategist[Strategist\nClaude Sonnet]
+      writer[Writer\nClaude Sonnet]
+      critic[Critic\nAmazon Nova Lite]
+    end
+  end
+
+  subgraph data[State and Content]
+    ddb[DynamoDB\nBidProjectState\nrun history and artifacts]
+    docs[S3\nbidflow-documents\nsource documents]
+  end
+
+  user --> cf --> web --> gateway --> lambda
+  lambda --> extractor --> researcher --> strategist --> writer --> critic
+  critic -- reject and revise once --> writer
+  critic -- approved result --> ddb
+  lambda --> ddb
+  docs --> researcher
+
+  classDef edge fill:#eef2ff,stroke:#5b6cff,color:#0f172a,stroke-width:1.2px;
+  classDef compute fill:#ecfeff,stroke:#0891b2,color:#0f172a,stroke-width:1.2px;
+  classDef storage fill:#ecfdf5,stroke:#059669,color:#0f172a,stroke-width:1.2px;
+  classDef pipelineNode fill:#fff7ed,stroke:#ea580c,color:#0f172a,stroke-width:1.2px;
+
+  class cf,web,gateway edge;
+  class lambda compute;
+  class ddb,docs storage;
+  class extractor,researcher,strategist,writer,critic pipelineNode;
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│  Frontend  (Next.js 14 · Static Export · S3 + CloudFront)            │
-└────────────────────────────┬─────────────────────────────────────────┘
-                             │  HTTPS
-                             ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  API Gateway  (HTTP API · CORS · POST /run · GET /runs/{id})         │
-└────────────────────────────┬─────────────────────────────────────────┘
-                             │  Async invoke
-                             ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                      Lambda: AgentOrchestrator                       │
-│                                                                      │
-│   ┌───────────┐   ┌────────────┐   ┌────────────┐   ┌───────────┐    │
-│   │ Extractor │──▶│ Researcher │──▶│ Strategist│──▶│  Writer  │    │
-│   │(Nova Lite)│   │  (KB RAG)  │   │  (Claude)  │   │ (Claude)  │    │
-│   └───────────┘   └────────────┘   └────────────┘   └─────┬─────┘    │
-│                                                            │         │ 
-│                                                            ▼         │
-│                                                      ┌───────────┐   │
-│                                            ┌────────▶│  Critic  │    │
-│                                            │ retry   │(Nova Lite)│   │
-│                                            │ (max 1) └─────┬─────┘   │
-│                                            │               │         │
-│                                            │   REJECT      │APPROVE  │
-│                                            └───────────────┘   │     │
-│                                                                ▼     │
-│                                                        Save result   │
-└────────────────────────────────────────────────────┬─────────────────┘
-                                                     │
-                    ┌───────────────────────────────┬┘
-                    ▼                               ▼
-         ┌──────────────────┐             ┌──────────────────┐
-         │    DynamoDB      │             │       S3         │
-         │ BidProjectState  │             │ bidflow-documents│
-         │ (run history +   │             │ (company PDFs for│
-         │  all artifacts)  │             │  Knowledge Base) │
-         └──────────────────┘             └──────────────────┘
-```
+
+The frontend serves a static Next.js workspace through S3 and CloudFront. Requests enter through API Gateway, which invokes a single Lambda orchestrator. That function runs the agent pipeline, retrieves supporting material from the Bedrock Knowledge Base backed by S3 documents, and persists run state plus generated artifacts to DynamoDB.
 
 ### AWS Services Used
 
