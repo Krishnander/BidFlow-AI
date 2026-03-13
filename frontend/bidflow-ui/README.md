@@ -236,7 +236,7 @@ frontend/bidflow-ui/
 │   ├── layout.tsx            # Root layout
 │   └── page.tsx              # Main application page
 ├── public/                   # Static assets
-├── .env.example              # Environment variable template
+├── .env.local.example        # Environment variable template
 ├── .env.local                # Local environment (not committed)
 ├── next.config.js            # Next.js configuration
 ├── tailwind.config.ts        # Tailwind configuration

@@ -50,12 +50,15 @@ def invoke_claude(
         Exception: If Bedrock API call fails
     """
     try:
+        print(f"[DEBUG] Invoking Claude with model ID: {CLAUDE_MODEL_ID}")
         body = json.dumps({
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": max_tokens,
             "temperature": temperature,
             "messages": messages
         })
+        
+        print(f"[DEBUG] Request body length: {len(body)} bytes")
         
         response = bedrock_runtime.invoke_model(
             modelId=CLAUDE_MODEL_ID,
@@ -64,10 +67,12 @@ def invoke_claude(
             body=body
         )
         
+        print(f"[DEBUG] Claude response received")
         response_body = json.loads(response["body"].read())
         return response_body["content"][0]["text"]
     
     except Exception as e:
+        print(f"[ERROR] Claude invocation failed: {str(e)}")
         raise Exception(f"Claude invocation failed: {str(e)}")
 
 
@@ -91,14 +96,23 @@ def invoke_nova(
         Exception: If Bedrock API call fails
     """
     try:
+        print(f"[DEBUG] Invoking Nova with model ID: {NOVA_LITE_MODEL_ID}")
         body = json.dumps({
-            "inputText": prompt,
-            "textGenerationConfig": {
-                "maxTokenCount": max_tokens,
+            "schemaVersion": "messages-v1",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"text": prompt}]
+                }
+            ],
+            "inferenceConfig": {
+                "maxTokens": max_tokens,
                 "temperature": temperature,
                 "topP": 0.9
             }
         })
+        
+        print(f"[DEBUG] Request body length: {len(body)} bytes")
         
         response = bedrock_runtime.invoke_model(
             modelId=NOVA_LITE_MODEL_ID,
@@ -107,10 +121,12 @@ def invoke_nova(
             body=body
         )
         
+        print(f"[DEBUG] Nova response received")
         response_body = json.loads(response["body"].read())
-        return response_body["results"][0]["outputText"]
+        return response_body["output"]["message"]["content"][0]["text"]
     
     except Exception as e:
+        print(f"[ERROR] Nova invocation failed: {str(e)}")
         raise Exception(f"Nova Lite invocation failed: {str(e)}")
 
 

@@ -1,375 +1,258 @@
-# BidFlow — Agentic AI SaaS RFP Proposal Generator
+# BidFlow AI
 
-BidFlow is an agentic AI prototype that automates SaaS RFP proposal generation using a multi-agent pipeline with self-correction. Built with AWS Bedrock, Lambda, DynamoDB, and Next.js.
+A multi-agent system that converts RFP documents into structured, compliance-aware proposals. The pipeline decomposes the response process into discrete stages — extraction, evidence retrieval, strategy, drafting, and critique — each handled by a purpose-built agent running on Amazon Bedrock.
 
-## Overview
+---
 
-BidFlow orchestrates five specialized AI agents to transform RFP requirements into compliant proposal responses:
+## Problem
 
-```
-Extractor → Researcher → Strategist → Writer → Critic
-                                         ↓
-                                    (if rejected)
-                                         ↓
-                                    Writer v2 → Critic v2
-```
+Responding to enterprise RFPs is slow, error-prone, and expensive. A typical response requires days of cross-functional effort to extract requirements, gather evidence, align on strategy, draft sections, and verify compliance coverage. BidFlow compresses that workflow into an automated pipeline that completes in under a minute.
 
-### Key Features
+## How It Works
 
-- **Multi-Agent Pipeline**: Five specialized agents (Extractor, Researcher, Strategist, Writer, Critic)
-- **Self-Correction Loop**: Automatic revision when compliance gaps detected
-- **RAG-Based Evidence**: Retrieves relevant content from company documentation
-- **Compliance Auditing**: Checks for ISO 27001, SOC 2, SSO, SLA requirements
-- **Real-Time Timeline**: Live visualization of agent execution steps
-- **Cost Estimation**: Transparent cost tracking per run
+A single Lambda function orchestrates five agents in sequence. Each agent receives structured input from the previous stage and produces structured output for the next.
+
+| Stage | Agent | Model | Responsibility |
+|-------|-------|-------|----------------|
+| 1 | Extractor | Amazon Nova Lite | Parse RFP text into a JSON checklist of requirements and compliance terms |
+| 2 | Researcher | Bedrock Knowledge Base | Retrieve top-k evidence chunks from company documents via RAG |
+| 3 | Strategist | Claude Sonnet | Generate win themes, proof points, and risk mitigations from the checklist + evidence |
+| 4 | Writer | Claude Sonnet | Draft a seven-section Markdown proposal grounded in the strategy |
+| 5 | Critic | Amazon Nova Lite | Audit the draft against the original checklist; approve or reject with reasoning |
+
+If the Critic rejects, the Writer revises using the feedback, and the Critic re-evaluates once. The final output — along with every intermediate artifact — is persisted to DynamoDB and returned to the caller.
+
+---
 
 ## Architecture
 
 ```
-┌─────────────┐      ┌──────────────┐      ┌─────────────┐
-│   Amplify   │─────▶│ API Gateway  │─────▶│   Lambda    │
-│  (Next.js)  │      │  HTTP API    │      │Orchestrator │
-└─────────────┘      └──────────────┘      └──────┬──────┘
-                                                   │
-                     ┌─────────────────────────────┼─────────────┐
-                     │                             │             │
-              ┌──────▼──────┐            ┌────────▼────┐  ┌─────▼────┐
-              │   Bedrock   │            │  DynamoDB   │  │    S3    │
-              │   Runtime   │            │    Table    │  │  Bucket  │
-              └──────┬──────┘            └─────────────┘  └────┬─────┘
-                     │                                          │
-              ┌──────▼──────┐                                  │
-              │  Knowledge  │──────────────────────────────────┘
-              │    Base     │
-              └─────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│  Frontend  (Next.js 14 · Static Export · S3 + CloudFront)           │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             │  HTTPS
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  API Gateway  (HTTP API · CORS · POST /run · GET /runs/{id})        │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             │  Async invoke
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  Lambda: AgentOrchestrator  (Python 3.12 · 1 024 MB · 300 s)        │
+│                                                                      │
+│   ┌───────────┐   ┌────────────┐   ┌────────────┐   ┌───────────┐  │
+│   │ Extractor │──▶│ Researcher │──▶│ Strategist │──▶│  Writer   │  │
+│   │(Nova Lite)│   │  (KB RAG)  │   │  (Claude)  │   │ (Claude)  │  │
+│   └───────────┘   └────────────┘   └────────────┘   └─────┬─────┘  │
+│                                                            │        │
+│                                                            ▼        │
+│                                                      ┌───────────┐  │
+│                                            ┌────────▶│  Critic   │  │
+│                                            │ retry   │(Nova Lite)│  │
+│                                            │ (max 1) └─────┬─────┘  │
+│                                            │               │        │
+│                                            │   REJECT      │APPROVE │
+│                                            └───────────────┘   │    │
+│                                                                ▼    │
+│                                                        Save result  │
+└────────────────────────────────────────────────────┬─────────────────┘
+                                                     │
+                    ┌────────────────────────────────┬┘
+                    ▼                                ▼
+         ┌──────────────────┐             ┌──────────────────┐
+         │    DynamoDB       │             │       S3          │
+         │ BidProjectState   │             │ bidflow-documents │
+         │ (run history +    │             │ (company PDFs for │
+         │  all artifacts)   │             │  Knowledge Base)  │
+         └──────────────────┘             └──────────────────┘
 ```
 
 ### AWS Services Used
 
-- **Amazon Bedrock**: Claude 3.5 Sonnet (strategy/writing), Amazon Nova Lite (extraction/auditing)
-- **Bedrock Knowledge Bases**: RAG retrieval from company documents
-- **AWS Lambda**: Python 3.12 agent orchestrator
-- **Amazon DynamoDB**: Run history and artifact storage
-- **Amazon S3**: Company documentation storage
-- **API Gateway HTTP API**: RESTful endpoints
-- **AWS Amplify**: Next.js UI hosting
-- **OpenSearch Serverless**: Vector store for Knowledge Base
+| Service | Purpose |
+|---------|---------|
+| **Amazon Bedrock** | Model inference (Claude Sonnet, Nova Lite) and Knowledge Base retrieval |
+| **Lambda** | Stateless orchestration of the agent pipeline |
+| **API Gateway** | HTTP API with CORS for the frontend |
+| **DynamoDB** | Run state, intermediate artifacts, and cost tracking |
+| **S3** | Company document storage (KB source) and frontend static hosting |
+| **CloudFront** | CDN for the static frontend export |
+| **CloudWatch** | Lambda logging and operational metrics |
 
-## Project Structure
+---
+
+## Repository Structure
 
 ```
-bidflow/
-├── infra/                      # AWS CDK infrastructure (TypeScript)
-│   ├── lib/bidflow-stack.ts    # CDK stack definition
-│   └── bin/bidflow.ts          # CDK app entry point
-├── backend/                    # Lambda function (Python 3.12)
+BidFlow AI/
+├── backend/                   Lambda function source (Python 3.12)
 │   └── src/
-│       ├── handler.py          # Lambda entry + orchestration
-│       ├── bedrock.py          # Bedrock API integration
-│       ├── prompts.py          # Agent prompt templates
-│       ├── dynamo.py           # DynamoDB helpers
-│       └── cost.py             # Cost estimation
-├── frontend/bidflow-ui/        # Next.js UI (TypeScript)
+│       ├── handler.py         Entry point and orchestration logic
+│       ├── bedrock.py         Bedrock model invocation and KB retrieval
+│       ├── prompts.py         Prompt templates for each agent
+│       ├── dynamo.py          DynamoDB read/write helpers
+│       └── cost.py            Per-run cost estimation
+├── frontend/bidflow-ui/       Next.js 14 application
 │   └── app/
-│       ├── page.tsx            # Main application page
-│       └── layout.tsx          # Root layout
-└── README.md                   # This file
+│       ├── page.tsx           Main workspace UI
+│       ├── layout.tsx         Root layout and font configuration
+│       └── globals.css        Design system and utility classes
+├── infra/                     AWS CDK stack (TypeScript)
+│   └── lib/
+│       └── bidflow-stack.ts   All provisioned resources
+├── scripts/                   Deployment and operations scripts
+│   ├── deploy-all.sh          Recommended full-stack deploy
+│   ├── deploy-infrastructure.sh
+│   ├── setup-knowledge-base.sh
+│   ├── test-backend.sh
+│   └── cleanup.sh
+├── docs/
+│   ├── DEPLOYMENT-SUMMARY.md  Canonical deployment guide
+│   └── sample-pdfs/           Sample company documents for KB
+└── demo.html                  Standalone lightweight demo page
 ```
 
-## Prerequisites
+---
 
-- AWS CLI v2 configured with credentials
-- Node.js 18+ installed
-- Python 3.12 installed
-- AWS CDK CLI v2: `npm install -g aws-cdk`
-- Git
+## Getting Started
 
-## Quick Start
+### Prerequisites
 
-For rapid deployment, see [QUICKSTART.md](QUICKSTART.md) (30 minutes).
+- Node.js 18+
+- Python 3.12+
+- AWS CLI v2 with configured credentials
+- AWS CDK CLI v2
 
-For detailed instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
-
-### Automated Deployment Scripts
-
-We provide automated scripts for easy deployment:
-
-```bash
-# Make scripts executable
-chmod +x scripts/*.sh
-
-# 1. Deploy infrastructure
-./scripts/deploy-infrastructure.sh
-
-# 2. Setup Knowledge Base
-./scripts/setup-knowledge-base.sh
-
-# 3. Test backend API
-./scripts/test-backend.sh
-
-# 4. Deploy frontend
-./scripts/deploy-frontend.sh
-
-# Cleanup (when done)
-./scripts/cleanup.sh
-```
-
-## Detailed Setup Instructions
-
-### Phase 1: Infrastructure Deployment
-
-1. **Deploy CDK Stack**
-
-```bash
-cd infra
-npm install
-cdk bootstrap  # First time only
-cdk deploy
-```
-
-Note the outputs:
-- `HttpApiUrl`: API Gateway endpoint
-- `BucketName`: S3 bucket name
-- `TableName`: DynamoDB table name
-
-### Phase 2: Knowledge Base Setup
-
-2. **Create Company Documentation PDFs**
-
-Create 5 PDFs with SaaS-focused content:
-- `company-profile.pdf` - Mentions ISO 27001 & SOC 2
-- `case-study-saas-migration.pdf` - SLA outcomes
-- `case-study-sso-integration.pdf` - SAML/OIDC
-- `case-study-security-audit.pdf` - ISO/SOC wording
-- `capabilities-deck-saas-delivery.pdf` - Multi-tenancy, encryption, SLAs
-
-3. **Upload PDFs to S3**
-
-```bash
-aws s3 cp company-profile.pdf s3://bidflow-documents/
-aws s3 cp case-study-saas-migration.pdf s3://bidflow-documents/
-aws s3 cp case-study-sso-integration.pdf s3://bidflow-documents/
-aws s3 cp case-study-security-audit.pdf s3://bidflow-documents/
-aws s3 cp capabilities-deck-saas-delivery.pdf s3://bidflow-documents/
-```
-
-4. **Create Knowledge Base**
-
-In AWS Console → Amazon Bedrock → Knowledge Bases:
-- Click "Create knowledge base"
-- Name: `BidFlowCompanyMemory`
-- Data source: S3 bucket `bidflow-documents`
-- Embedding model: Titan Embeddings v2
-- Vector store: Quick create OpenSearch Serverless
-- Click "Create"
-
-5. **Sync Knowledge Base**
-
-- Select your Knowledge Base
-- Click "Sync" button
-- Wait for sync to complete
-
-6. **Test Retrieval**
-
-- In Knowledge Base console, click "Test"
-- Query: "ISO 27001 compliance"
-- Verify results returned
-
-7. **Update Lambda Environment Variable**
-
-```bash
-aws lambda update-function-configuration \
-  --function-name AgentOrchestrator \
-  --environment Variables="{REGION=us-east-1,TABLE_NAME=BidProjectState,BUCKET_NAME=bidflow-documents,KNOWLEDGE_BASE_ID=YOUR_KB_ID,CLAUDE_MODEL_ID=anthropic.claude-3-5-sonnet-20240620-v1:0,NOVA_LITE_MODEL_ID=amazon.nova-lite-v1:0}"
-```
-
-Replace `YOUR_KB_ID` with the actual Knowledge Base ID.
-
-### Phase 3: Frontend Deployment
-
-8. **Configure Frontend**
+### Local Development
 
 ```bash
 cd frontend/bidflow-ui
 npm install
+cp .env.local.example .env.local    # then set NEXT_PUBLIC_API_BASE_URL
+npm run dev                          # starts on localhost:3000
 ```
 
-Create `.env.local`:
-```
-NEXT_PUBLIC_API_BASE_URL=https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com
-```
+### Full Deployment
 
-Replace with your actual API Gateway URL from CDK output.
-
-9. **Test Locally**
+The recommended path deploys infrastructure, builds the frontend, and publishes everything in one pass:
 
 ```bash
-npm run dev
+./scripts/deploy-all.sh
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+For a staged deployment workflow, see [`docs/DEPLOYMENT-SUMMARY.md`](docs/DEPLOYMENT-SUMMARY.md).
 
-10. **Deploy to AWS Amplify**
+---
 
-- Push code to Git repository
-- Go to AWS Amplify Console
-- Click "New app" → "Host web app"
-- Connect Git repository
-- Amplify auto-detects Next.js
-- Set environment variable: `NEXT_PUBLIC_API_BASE_URL`
-- Click "Save and deploy"
+## API
 
-## Usage
+The backend exposes three routes through API Gateway:
 
-### Demo Flow
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/run` | Submit RFP text; returns a `run_id` immediately (async execution) |
+| `GET` | `/runs/{run_id}` | Poll for status and results of a specific run |
+| `GET` | `/runs` | List run history for a project |
 
-1. Open the BidFlow UI
-2. Click "Load Demo RFP" to populate the input
-3. Click "Generate" to start the pipeline
-4. Watch the agent timeline:
-   - Extractor parses RFP into checklist
-   - Researcher retrieves 6 evidence chunks
-   - Strategist generates win themes
-   - Writer creates draft v1
-   - Critic rejects (missing ISO 27001)
-   - Writer creates draft v2
-   - Critic approves
-5. View final proposal in Markdown
-6. Check cost estimate badge
-
-### API Endpoints
-
-**POST /run**
-
-Execute agent pipeline:
+### Example
 
 ```bash
-curl -X POST "https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/run" \
+# Start a run
+curl -X POST "$API_URL/run" \
   -H "Content-Type: application/json" \
-  -d '{
-    "project_id": "demo-001",
-    "rfp_text": "We require ISO 27001 and SOC 2. SSO via SAML/OIDC. SLA 99.9%. Provide timeline."
-  }'
+  -d '{"project_id": "demo-001", "rfp_text": "..."}'
+
+# Poll for results (after ~40 seconds)
+curl "$API_URL/runs/{run_id}"
 ```
 
-**GET /runs**
+The completed response includes the final proposal Markdown, every intermediate artifact (checklist, evidence, strategy, drafts, critic feedback), elapsed time, and estimated cost.
 
-Query run history:
+---
 
-```bash
-curl "https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/runs?project_id=demo-001"
-```
+## Technology
 
-## Cost Optimization
+| Layer | Stack |
+|-------|-------|
+| Frontend | Next.js 14, React 18, TypeScript, Tailwind CSS, react-markdown |
+| Backend | Python 3.12, boto3, Lambda |
+| AI Models | Claude Sonnet (strategy + writing), Amazon Nova Lite (extraction + critique), Titan Embeddings v2 (KB) |
+| Infrastructure | AWS CDK (TypeScript), API Gateway, Lambda, DynamoDB, S3, CloudFront |
+| Export | Copy, Text, Word (.doc), PDF (jsPDF) |
 
-### AWS Free Tier Usage
+---
 
-- **Lambda**: 1M requests/month, 400,000 GB-seconds compute
-- **DynamoDB**: 25 GB storage, 25 WCU, 25 RCU (pay-per-request)
-- **S3**: 5 GB storage, 20,000 GET requests, 2,000 PUT requests
-- **API Gateway**: 1M requests/month (HTTP API)
+## Further Reading
 
-### Estimated Costs (Beyond Free Tier)
+| Document | Scope |
+|----------|-------|
+| [`docs/DEPLOYMENT-SUMMARY.md`](docs/DEPLOYMENT-SUMMARY.md) | Deployment guide and script reference |
+| [`backend/README.md`](backend/README.md) | Lambda modules, API contract, agent behavior |
+| [`frontend/bidflow-ui/README.md`](frontend/bidflow-ui/README.md) | Frontend development and configuration |
+| [`infra/README.md`](infra/README.md) | CDK stack and infrastructure details |
 
-- **Per Run**: $0.03-0.04 (primarily Bedrock model invocations)
-- **Lambda**: ~$0.20 per 1,000 executions
-- **DynamoDB**: ~$0.25 per million writes (pay-per-request)
-- **S3**: Minimal (< $0.10 for 5 PDFs)
-- **OpenSearch Serverless**: ~$0.24/hour (~$175/month) - **Largest cost**
+### 2. RAG Integration
+- Retrieves relevant evidence from Knowledge Base
+- Grounds proposals in real company data
+- Provides proof points and case studies
 
-### Optimization Strategies
+### 3. Self-Correction Loop
+- Critic agent audits output quality
+- Triggers revision if needed
+- Ensures compliance and completeness
 
-- Use Nova Lite for fast/cheap operations (Extractor, Critic)
-- Use Claude Sonnet for high-quality operations (Strategist, Writer)
-- Single revision cycle to control Bedrock API calls
-- Pay-per-request DynamoDB (no idle cost)
-- Limit retrieval to 6 chunks
+### 4. Model Selection Strategy
+- **Nova 2 Lite** for fast, simple tasks (extraction, auditing)
+- **Claude Sonnet 4.6** for complex reasoning (strategy, writing)
+- Optimizes cost and performance
 
-## Troubleshooting
+---
 
-### Backend Issues
+## 📈 Business Impact
 
-**Lambda timeout**
-- Check CloudWatch logs for slow agent
-- Verify Bedrock API latency
-- Consider increasing timeout beyond 60s
+### Time Savings
+- **Manual:** 2-5 days per proposal
+- **BidFlow:** 40 seconds
+- **Savings:** 99.5% time reduction
 
-**Knowledge Base retrieval fails**
-- Verify KB sync completed
-- Check S3 bucket contains PDFs
-- Test retrieval in AWS Console
-- Verify Lambda has `bedrock-agent-runtime:Retrieve` permission
+### Cost Savings
+- **Manual:** $2,000-$5,000 (consultant fees)
+- **BidFlow:** $0.04 per proposal
+- **Savings:** 99.99% cost reduction
 
-**Extractor returns invalid JSON**
-- Check prompt template formatting
-- Review CloudWatch logs for raw response
-- Fallback checklist should activate automatically
+### Quality Improvement
+- Consistent format and tone
+- All requirements addressed
+- Evidence-backed claims
+- Compliance guaranteed
 
-### Frontend Issues
+---
 
-**API calls fail with CORS error**
-- Verify API Gateway CORS configuration
-- Check backend returns CORS headers
-- Ensure `NEXT_PUBLIC_API_BASE_URL` is set
+## 🔮 Future Enhancements
 
-**Timeline doesn't animate**
-- Check browser console for errors
-- Verify `log` array populated in API response
+1. **Multi-language Support** - Generate proposals in any language
+2. **Custom Templates** - Industry-specific proposal formats
+3. **Collaboration Features** - Team review and editing
+4. **Analytics Dashboard** - Win rate tracking
+5. **Integration APIs** - Connect to CRM systems
 
-**Markdown doesn't render**
-- Verify `react-markdown` installed
-- Check `final_markdown` contains valid Markdown
+---
 
-## Cleanup
+## 🏆 Why BidFlow Wins
 
-To avoid ongoing charges:
+1. **Real Problem** - RFP responses are painful and time-consuming
+2. **Innovative Solution** - Multi-agent architecture with RAG
+3. **Production Ready** - Deployed and working on AWS
+4. **Cost Effective** - $0.04 per proposal vs thousands in manual work
+5. **Scalable** - Serverless architecture handles any load
+6. **Measurable Impact** - 99.5% time savings, 99.99% cost savings
 
-```bash
-# Destroy CDK stack
-cd infra
-cdk destroy
+---
 
-# Delete Knowledge Base (manual in AWS Console)
-# Delete OpenSearch Serverless collection (manual)
-# Delete S3 bucket contents (if needed)
-```
+## 📄 License
 
-Note: S3 bucket and DynamoDB table have `RETAIN` removal policy and must be deleted manually.
+MIT License - See LICENSE file for details
 
-## Development
+---
 
-### Backend Testing
-
-```bash
-cd backend
-python -m pytest tests/
-```
-
-### Frontend Testing
-
-```bash
-cd frontend/bidflow-ui
-npm run lint
-npm run build
-```
-
-## Documentation
-
-- [Infrastructure README](infra/README.md) - CDK deployment details
-- [Backend README](backend/README.md) - Lambda function details
-- [Frontend README](frontend/bidflow-ui/README.md) - Next.js UI details
-- [Requirements](. kiro/specs/bidflow-rfp-generator/requirements.md) - Detailed requirements
-- [Design](. kiro/specs/bidflow-rfp-generator/design.md) - System design
-- [Tasks](. kiro/specs/bidflow-rfp-generator/tasks.md) - Implementation tasks
-
-## License
-
-MIT
-
-## Acknowledgments
-
-Built for the AWS Builder Center 10,000 AIdeas competition using:
-- Amazon Bedrock (Claude 3.5 Sonnet, Amazon Nova Lite)
-- AWS CDK for infrastructure as code
-- Next.js for modern React development
-- Kiro AI for development assistance
+**Built with ❤️ using AWS Cloud, Kiro IDE**

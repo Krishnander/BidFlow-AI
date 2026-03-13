@@ -11,6 +11,8 @@ import json
 import os
 import time
 import uuid
+import boto3
+from decimal import Decimal
 from typing import Dict, List, Any, Tuple
 
 # Import BidFlow modules
@@ -21,11 +23,15 @@ from prompts import (
     build_writer_prompt,
     build_critic_prompt
 )
-from dynamo import save_run, query_runs
+from dynamo import save_run, query_runs, get_run, update_run_status
 from cost import estimate_cost
 
 # Environment configuration
 KNOWLEDGE_BASE_ID = os.environ.get("KNOWLEDGE_BASE_ID", "PLACEHOLDER")
+LAMBDA_FUNCTION_NAME = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "AgentOrchestrator")
+
+# Initialize Lambda client for async invocation
+lambda_client = boto3.client("lambda")
 
 
 def _response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -39,16 +45,33 @@ def _response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Lambda response dict with headers and JSON body
     """
-    return {
-        "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "*",
-            "Access-Control-Allow-Methods": "*",
-        },
-        "body": json.dumps(body)
-    }
+    try:
+        # Convert Decimal types to float for JSON serialization
+        def decimal_to_float(obj):
+            if isinstance(obj, Decimal):
+                return float(obj)
+            raise TypeError
+        
+        return {
+            "statusCode": status_code,
+            "headers": {
+                "Content-Type": "application/json; charset=utf-8",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Allow-Methods": "*",
+            },
+            "body": json.dumps(body, default=decimal_to_float, ensure_ascii=False)
+        }
+    except Exception as e:
+        print(f"[ERROR] Failed to build response: {str(e)}")
+        return {
+            "statusCode": 500,
+            "headers": {
+                "Content-Type": "application/json; charset=utf-8",
+                "Access-Control-Allow-Origin": "*",
+            },
+            "body": json.dumps({"error": f"Failed to serialize response: {str(e)}"})
+        }
 
 
 def _safe_json_parse(text: str) -> Dict[str, Any]:
@@ -184,7 +207,7 @@ def orchestrate_pipeline(project_id: str, rfp_text: str, trace_id: str) -> Tuple
         
         draft_v1 = invoke_claude(
             messages=[{"role": "user", "content": writer_prompt}],
-            max_tokens=1100,
+            max_tokens=2000,
             temperature=0.3
         )
     except Exception as e:
@@ -230,7 +253,7 @@ def orchestrate_pipeline(project_id: str, rfp_text: str, trace_id: str) -> Tuple
             
             draft_v2 = invoke_claude(
                 messages=[{"role": "user", "content": revision_prompt}],
-                max_tokens=1100,
+                max_tokens=2000,
                 temperature=0.25
             )
             
@@ -284,8 +307,10 @@ def handler(event, context):
     Lambda entry point for BidFlow agent orchestration.
     
     Routes:
-    - POST /run: Execute agent pipeline
+    - POST /run: Start async pipeline execution (returns immediately with run_id)
+    - GET /runs/{run_id}: Get status and results of a specific run
     - GET /runs: Query run history
+    - ASYNC_EXECUTE: Internal event for async pipeline execution
     
     Args:
         event: Lambda event dict with requestContext and body
@@ -294,9 +319,33 @@ def handler(event, context):
     Returns:
         HTTP response dict with status code, headers, and JSON body
     """
+    # Check if this is an async execution event
+    if event.get("async_execute"):
+        return _handle_async_execution(event, context)
+    
     # Extract request details
     path = event.get("requestContext", {}).get("http", {}).get("path", "")
     method = event.get("requestContext", {}).get("http", {}).get("method", "")
+    
+    # Route: GET /runs/{run_id}
+    if method == "GET" and "/runs/" in path:
+        try:
+            # Extract run_id from path
+            run_id = path.split("/runs/")[-1]
+            
+            print(f"[DEBUG] GET /runs/{{run_id}}: run_id={run_id}")
+            
+            # Get run from DynamoDB
+            run = get_run("demo-001", run_id)
+            
+            print(f"[DEBUG] Retrieved run with status: {run.get('status')}")
+            
+            return _response(200, run)
+        
+        except Exception as e:
+            return _response(404, {
+                "error": f"Run not found: {str(e)}"
+            })
     
     # Route: GET /runs
     if method == "GET" and path.endswith("/runs"):
@@ -316,7 +365,7 @@ def handler(event, context):
                 "error": f"Failed to query runs: {str(e)}"
             })
     
-    # Route: POST /run
+    # Route: POST /run (async start)
     try:
         # Parse request body
         body = json.loads(event.get("body") or "{}")
@@ -327,24 +376,98 @@ def handler(event, context):
         if not rfp_text:
             return _response(400, {"error": "rfp_text required"})
         
-        # Generate trace ID
-        trace_id = str(uuid.uuid4())
+        # Generate run ID (using timestamp as sort key)
+        run_id = str(int(time.time() * 1000))  # Millisecond timestamp
+        
+        print(f"[DEBUG] Creating async run: project_id={project_id}, run_id={run_id}")
+        
+        # Create initial run record with "pending" status
+        initial_record = {
+            "project_id": project_id,
+            "timestamp": run_id,
+            "status": "pending",
+            "rfp_text": rfp_text,
+            "created_at": int(time.time())
+        }
+        
+        save_run(initial_record)
+        
+        print(f"[DEBUG] Initial record saved, invoking async execution")
+        
+        # Invoke Lambda asynchronously to process the pipeline
+        async_payload = {
+            "async_execute": True,
+            "project_id": project_id,
+            "run_id": run_id,
+            "rfp_text": rfp_text
+        }
+        
+        lambda_client.invoke(
+            FunctionName=LAMBDA_FUNCTION_NAME,
+            InvocationType="Event",  # Async invocation
+            Payload=json.dumps(async_payload)
+        )
+        
+        print(f"[DEBUG] Async invocation triggered")
+        
+        # Return immediately with run_id and status
+        return _response(202, {
+            "run_id": run_id,
+            "project_id": project_id,
+            "status": "pending",
+            "message": "Pipeline execution started. Use GET /runs/{run_id} to check status.",
+            "poll_url": f"/runs/{run_id}"
+        })
+    
+    except Exception as e:
+        return _response(500, {
+            "error": f"Failed to start pipeline: {str(e)}"
+        })
+
+
+def _handle_async_execution(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Handle async pipeline execution.
+    
+    This function is called when Lambda invokes itself asynchronously.
+    It executes the full pipeline and updates the run record in DynamoDB.
+    
+    Args:
+        event: Async execution event with project_id, run_id, rfp_text
+        context: Lambda context object
+    
+    Returns:
+        Success/failure dict (not returned to client)
+    """
+    project_id = event.get("project_id")
+    run_id = event.get("run_id")
+    rfp_text = event.get("rfp_text")
+    
+    print(f"[DEBUG] Starting async execution: project_id={project_id}, run_id={run_id}")
+    
+    try:
+        # Update status to "processing"
+        update_run_status(project_id, run_id, "processing")
         
         # Execute pipeline
         log, artifacts, final_markdown, cost_estimate = orchestrate_pipeline(
             project_id=project_id,
             rfp_text=rfp_text,
-            trace_id=trace_id
+            trace_id=run_id
         )
         
-        # Calculate elapsed time
-        elapsed = round(time.time() - context.get_remaining_time_in_millis() / 1000, 2) if context else 0
+        print(f"[DEBUG] Pipeline completed successfully")
         
-        # Save run record to DynamoDB
-        record = {
-            "trace_id": trace_id,
+        # Calculate elapsed time
+        elapsed = round(time.time() - int(run_id) / 1000, 2)
+        
+        print(f"[DEBUG] Building final DynamoDB record")
+        
+        # Update run record with results and "completed" status
+        final_record = {
             "project_id": project_id,
-            "elapsed_seconds": elapsed,
+            "timestamp": run_id,
+            "status": "completed",
             "rfp_text": rfp_text,
             "checklist": artifacts["checklist"],
             "evidence": artifacts["evidence"],
@@ -354,23 +477,32 @@ def handler(event, context):
             "draft_v2": artifacts["draft_v2"],
             "critic_v2": artifacts["critic_v2"],
             "final_markdown": final_markdown,
-            "cost_estimate_usd": cost_estimate
+            "cost_estimate_usd": cost_estimate,
+            "elapsed_seconds": elapsed,
+            "log": log,
+            "completed_at": int(time.time())
         }
         
-        save_run(record)
+        print(f"[DEBUG] Calling save_run() with completed status")
+        save_run(final_record)
+        print(f"[DEBUG] Async execution completed successfully")
         
-        # Return response
-        return _response(200, {
-            "trace_id": trace_id,
-            "project_id": project_id,
-            "log": log,
-            "artifacts": artifacts,
-            "final_markdown": final_markdown,
-            "cost_estimate_usd": cost_estimate,
-            "elapsed_seconds": elapsed
-        })
+        return {"status": "success", "run_id": run_id}
     
     except Exception as e:
-        return _response(500, {
-            "error": f"Pipeline execution failed: {str(e)}"
-        })
+        print(f"[ERROR] Async execution failed: {str(e)}")
+        
+        # Update status to "failed" with error message
+        try:
+            error_record = {
+                "project_id": project_id,
+                "timestamp": run_id,
+                "status": "failed",
+                "error": str(e),
+                "failed_at": int(time.time())
+            }
+            save_run(error_record)
+        except Exception as save_error:
+            print(f"[ERROR] Failed to save error status: {str(save_error)}")
+        
+        return {"status": "error", "run_id": run_id, "error": str(e)}

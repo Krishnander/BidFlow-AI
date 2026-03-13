@@ -1,152 +1,54 @@
-# BidFlow Deployment Summary
+# BidFlow Deployment Guide
 
-## Deployment Scripts Overview
+This is the canonical deployment document for the repository. If deployment instructions conflict elsewhere, use this file.
 
-BidFlow includes 5 automated deployment scripts to streamline the setup process:
+## Recommended Path
+
+For a clean end-to-end deployment, use:
+
+```bash
+./scripts/deploy-all.sh
+```
+
+That script deploys infrastructure, writes `deployment-outputs.json`, builds the frontend, and publishes the static site to the provisioned frontend hosting resources.
+
+## Script Map
+
+BidFlow includes the following deployment and operations scripts:
 
 ### 1. `check-prerequisites.sh`
-**Purpose:** Verify all required tools are installed and configured
+Purpose: Verify required local tools and AWS access before deployment.
 
-**What it checks:**
-- ✅ AWS CLI v2
-- ✅ Node.js 18+
-- ✅ Python 3.12+
-- ✅ Git
-- ✅ AWS CDK CLI
-- ✅ jq (JSON processor)
-- ✅ AWS credentials
-- ✅ AWS region configuration
+### 2. `deploy-all.sh`
+Purpose: Recommended full-stack deployment path.
 
-**Usage:**
-```bash
-./scripts/check-prerequisites.sh
-```
+What it does:
+- Installs infra dependencies.
+- Bootstraps CDK if required.
+- Deploys the stack and writes `deployment-outputs.json`.
+- Builds the frontend with the deployed API URL.
+- Uploads frontend output and invalidates CloudFront.
 
-**When to run:** Before starting deployment
+### 3. `deploy-infrastructure.sh`
+Purpose: Manual staged deployment for infrastructure only.
 
----
+What it does:
+- Deploys the CDK stack.
+- Saves outputs to `deployment-outputs.json`.
 
-### 2. `deploy-infrastructure.sh`
-**Purpose:** Deploy AWS infrastructure using CDK
+### 4. `setup-knowledge-base.sh`
+Purpose: Configure the Bedrock knowledge-base workflow after infrastructure deployment.
 
-**What it does:**
-- Checks prerequisites
-- Installs CDK dependencies
-- Bootstraps CDK (if needed)
-- Deploys CloudFormation stack
-- Creates S3 bucket, DynamoDB table, Lambda, API Gateway
-- Saves outputs to `deployment-outputs.json`
+### 5. `test-backend.sh`
+Purpose: Validate the deployed API and orchestration flow.
 
-**Resources created:**
-- S3 bucket: `bidflow-documents`
-- DynamoDB table: `BidProjectState`
-- Lambda function: `AgentOrchestrator`
-- API Gateway HTTP API
-- IAM roles and policies
+### 6. `deploy-frontend.sh`
+Purpose: Legacy/manual frontend deployment helper.
 
-**Usage:**
-```bash
-./scripts/deploy-infrastructure.sh
-```
+Use this only if you intentionally want to deploy the frontend separately from the recommended `deploy-all.sh` flow.
 
-**Duration:** ~5 minutes
-
-**Output:** `deployment-outputs.json` with API URL, bucket name, table name
-
----
-
-### 3. `setup-knowledge-base.sh`
-**Purpose:** Setup Bedrock Knowledge Base with company documentation
-
-**What it does:**
-- Uploads PDFs to S3
-- Provides step-by-step instructions for creating Knowledge Base
-- Updates Lambda with Knowledge Base ID
-
-**Manual steps required:**
-- Create Knowledge Base in AWS Console
-- Configure data source (S3)
-- Select embedding model (Titan v2)
-- Create vector store (OpenSearch Serverless)
-- Sync data source
-- Copy Knowledge Base ID
-
-**Usage:**
-```bash
-./scripts/setup-knowledge-base.sh
-```
-
-**Duration:** ~5 minutes (including manual steps)
-
-**Prerequisites:** 5 PDF files in `docs/sample-pdfs/`
-
----
-
-### 4. `test-backend.sh`
-**Purpose:** Test deployed backend API
-
-**What it tests:**
-- POST /run endpoint (execute pipeline)
-- GET /runs endpoint (query history)
-- Agent execution order
-- Self-correction loop
-- Response format
-- Error handling
-
-**Usage:**
-```bash
-./scripts/test-backend.sh
-```
-
-**Duration:** ~1 minute (pipeline execution takes 30-60 seconds)
-
-**Output:** `test-response.json` with full pipeline response
-
----
-
-### 5. `deploy-frontend.sh`
-**Purpose:** Deploy Next.js frontend
-
-**What it does:**
-- Installs npm dependencies
-- Configures environment variables
-- Builds Next.js application
-- Provides deployment options (Amplify or local)
-
-**Deployment options:**
-- **Option A:** AWS Amplify (recommended for production)
-- **Option B:** Local server (for testing)
-
-**Usage:**
-```bash
-./scripts/deploy-frontend.sh
-```
-
-**Duration:** ~3 minutes (build) + deployment time
-
----
-
-### 6. `cleanup.sh`
-**Purpose:** Remove all deployed resources
-
-**What it does:**
-- Empties S3 bucket
-- Destroys CDK stack
-- Provides instructions for manual cleanup
-
-**Manual cleanup required:**
-- Knowledge Base
-- OpenSearch Serverless collection
-- Amplify app (if deployed)
-
-**Usage:**
-```bash
-./scripts/cleanup.sh
-```
-
-**Duration:** ~2 minutes
-
----
+### 7. `cleanup.sh`
+Purpose: Tear down deployed resources and optionally remove local deployment artifacts.
 
 ## Deployment Flow
 
@@ -159,9 +61,9 @@ BidFlow includes 5 automated deployment scripts to streamline the setup process:
    ↓
    Verify tools installed
    ↓
-2. deploy-infrastructure.sh
+2. deploy-all.sh
    ↓
-   Create AWS resources (S3, DynamoDB, Lambda, API Gateway)
+  Deploy AWS resources and save deployment outputs
    ↓
 3. setup-knowledge-base.sh
    ↓
@@ -170,10 +72,6 @@ BidFlow includes 5 automated deployment scripts to streamline the setup process:
 4. test-backend.sh
    ↓
    Test API endpoints → Verify pipeline → Check self-correction
-   ↓
-5. deploy-frontend.sh
-   ↓
-   Build Next.js → Deploy to Amplify or local
    ↓
    ✅ BidFlow is live!
 ```
@@ -187,10 +85,11 @@ bidflow/
 ├── test-response.json           # Backend test results
 ├── scripts/
 │   ├── check-prerequisites.sh   # ✅ Executable
+│   ├── deploy-all.sh            # ✅ Recommended full deploy
 │   ├── deploy-infrastructure.sh # ✅ Executable
 │   ├── setup-knowledge-base.sh  # ✅ Executable
 │   ├── test-backend.sh          # ✅ Executable
-│   ├── deploy-frontend.sh       # ✅ Executable
+│   ├── deploy-frontend.sh       # Manual frontend path
 │   └── cleanup.sh               # ✅ Executable
 ├── docs/
 │   └── sample-pdfs/             # Company documentation PDFs
@@ -207,6 +106,7 @@ bidflow/
 ├── frontend/bidflow-ui/
 │   ├── .env.local               # Environment variables
 │   ├── .next/                   # Next.js build output
+│   ├── out/                     # Static export output
 │   └── node_modules/            # Frontend dependencies
 └── README.md
 ```
@@ -225,6 +125,12 @@ Set automatically by CDK:
 ### Frontend (Next.js)
 Set in `.env.local`:
 - `NEXT_PUBLIC_API_BASE_URL`: API Gateway URL from deployment-outputs.json
+
+## Operational Notes
+
+- `deployment-outputs.json` is the standard local outputs file across scripts.
+- `deploy-all.sh` is the preferred deployment path for this repository.
+- Use the staged scripts only if you need to stop between infrastructure, KB setup, testing, and frontend publishing.
 
 ## AWS Resources Created
 
@@ -310,7 +216,7 @@ Print this checklist and check off items as you complete them:
 - [ ] Node.js 18+ installed
 - [ ] Python 3.12+ installed
 - [ ] Git installed
-- [ ] Bedrock model access enabled
+- [ ] Bedrock models (auto-enabled on first use)
 
 ### Infrastructure
 - [ ] Scripts made executable (`chmod +x scripts/*.sh`)

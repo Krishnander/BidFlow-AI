@@ -64,6 +64,12 @@ Write a formal Markdown response with these sections:
 Constraints:
 - MUST include these exact terms: {must_include_terms}
 - Word limit: {word_limit}
+- Use exactly the seven top-level headings listed above and no other top-level headings.
+- Every listed section must be present, even if brief.
+- Do not stop early or omit later sections.
+- Keep each section concise: 1 short paragraph or 2-4 bullets per section.
+- Do not create long nested subsections before all seven required sections are covered.
+- Stay within the word limit by being direct, not by omitting sections.
 Tone: {tone}
 
 Strategy:
@@ -84,6 +90,15 @@ Checklist JSON:
 Draft:
 {draft}
 
+Before approving, verify that the draft contains these exact section headings:
+- Executive Summary
+- Understanding of Requirements
+- Proposed Approach
+- Delivery Plan
+- Security & Compliance
+- Relevant Experience
+- Assumptions and Next Steps
+
 Return ONLY one line:
 APPROVED
 or
@@ -95,6 +110,13 @@ REJECT: Missing SOC 2
 REJECT: Missing SSO
 REJECT: Missing SLA
 REJECT: Missing timeline
+REJECT: Missing Executive Summary
+REJECT: Missing Understanding of Requirements
+REJECT: Missing Proposed Approach
+REJECT: Missing Delivery Plan
+REJECT: Missing Security & Compliance
+REJECT: Missing Relevant Experience
+REJECT: Missing Assumptions and Next Steps
 REJECT: Over word limit"""
 
 

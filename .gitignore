@@ -1,0 +1,17 @@
+deployment-outputs.json
+*.bak
+*.orig
+*.tmp
+
+# Frontend local/build artifacts
+frontend/bidflow-ui/.env.local
+frontend/bidflow-ui/.next/
+frontend/bidflow-ui/out/
+frontend/bidflow-ui/node_modules/
+
+# Infra local/build artifacts
+infra/cdk.out/
+infra/node_modules/
+
+# Common dependency folders
+node_modules/

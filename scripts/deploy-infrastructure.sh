@@ -5,6 +5,23 @@
 
 set -e  # Exit on error
 
+# Parse command line arguments
+AWS_PROFILE_ARG=""
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --profile)
+            AWS_PROFILE_ARG="--profile $2"
+            export AWS_PROFILE="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--profile profile-name]"
+            exit 1
+            ;;
+    esac
+done
+
 echo "========================================="
 echo "BidFlow Infrastructure Deployment"
 echo "========================================="
@@ -37,25 +54,32 @@ fi
 echo "✅ AWS CDK found: $(cdk --version)"
 
 # Check Python
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Python 3 not found. Please install Python 3.12+."
+if command -v python3 &> /dev/null; then
+    echo "✅ Python found: $(python3 --version 2>&1 | head -n1)"
+elif command -v python &> /dev/null; then
+    echo "✅ Python found: $(python --version 2>&1 | head -n1)"
+else
+    echo "❌ Python not found. Please install Python 3.12+."
     exit 1
 fi
-echo "✅ Python found: $(python3 --version)"
 
 # Check AWS credentials
 echo ""
 echo "Checking AWS credentials..."
-if ! aws sts get-caller-identity &> /dev/null; then
+if ! aws sts get-caller-identity $AWS_PROFILE_ARG &> /dev/null; then
     echo "❌ AWS credentials not configured."
-    echo "   Run: aws configure"
+    echo "   Run: aws configure --profile personal"
+    echo "   Or: export AWS_PROFILE=personal"
     exit 1
 fi
 
-AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-AWS_REGION=$(aws configure get region || echo "us-east-1")
+AWS_ACCOUNT=$(aws sts get-caller-identity $AWS_PROFILE_ARG --query Account --output text)
+AWS_REGION=$(aws configure get region $AWS_PROFILE_ARG || echo "us-east-1")
 echo "✅ AWS Account: $AWS_ACCOUNT"
 echo "✅ AWS Region: $AWS_REGION"
+if [ -n "$AWS_PROFILE" ]; then
+    echo "✅ AWS Profile: $AWS_PROFILE"
+fi
 
 # Verify region is us-east-1
 if [ "$AWS_REGION" != "us-east-1" ]; then
@@ -72,24 +96,15 @@ fi
 # Check Bedrock model access
 echo ""
 echo "Checking Bedrock model access..."
-echo "⚠️  Please ensure you have requested access to these models in us-east-1:"
-echo "   - Claude 3.5 Sonnet (anthropic.claude-3-5-sonnet-20240620-v1:0)"
-echo "   - Amazon Nova Lite (amazon.nova-lite-v1:0)"
+echo "ℹ️  Bedrock models are now automatically enabled on first use"
+echo "   BidFlow uses these models in us-east-1:"
+echo "   - Claude 3.5 Sonnet (anthropic.claude-3-5-sonnet-20241022-v2:0)"
+echo "   - Amazon Nova Lite (us.amazon.nova-lite-v1:0)"
 echo "   - Titan Embeddings v2 (amazon.titan-embed-text-v2:0)"
 echo ""
-echo "   To request access:"
-echo "   1. Go to AWS Console → Amazon Bedrock → Model access"
-echo "   2. Select us-east-1 region"
-echo "   3. Click 'Manage model access'"
-echo "   4. Enable the models listed above"
-echo "   5. Wait for access to be granted (usually instant)"
+echo "   Note: First-time Anthropic users may need to submit use case details"
+echo "   Models will activate automatically when the Lambda function runs"
 echo ""
-read -p "Have you enabled Bedrock model access? (y/N): " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Please enable Bedrock model access first, then re-run this script."
-    exit 1
-fi
 
 # Navigate to infra directory
 echo ""
@@ -104,9 +119,9 @@ npm install
 # Bootstrap CDK (if needed)
 echo ""
 echo "Checking CDK bootstrap status..."
-if ! aws cloudformation describe-stacks --stack-name CDKToolkit --region us-east-1 &> /dev/null; then
+if ! aws cloudformation describe-stacks --stack-name CDKToolkit --region us-east-1 $AWS_PROFILE_ARG &> /dev/null; then
     echo "CDK not bootstrapped. Bootstrapping now..."
-    cdk bootstrap aws://$AWS_ACCOUNT/us-east-1
+    cdk bootstrap aws://$AWS_ACCOUNT/us-east-1 $AWS_PROFILE_ARG
 else
     echo "✅ CDK already bootstrapped"
 fi
@@ -132,7 +147,7 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 1
 fi
 
-cdk deploy --require-approval never
+cdk deploy --require-approval never $AWS_PROFILE_ARG
 
 # Extract outputs
 echo ""
@@ -144,6 +159,7 @@ echo "Stack outputs:"
 aws cloudformation describe-stacks \
     --stack-name BidFlowStack \
     --region us-east-1 \
+    $AWS_PROFILE_ARG \
     --query 'Stacks[0].Outputs' \
     --output table
 
@@ -153,13 +169,14 @@ echo "Saving outputs to deployment-outputs.json..."
 aws cloudformation describe-stacks \
     --stack-name BidFlowStack \
     --region us-east-1 \
+    $AWS_PROFILE_ARG \
     --query 'Stacks[0].Outputs' \
     --output json > ../deployment-outputs.json
 
 echo "✅ Outputs saved to deployment-outputs.json"
 echo ""
 echo "Next steps:"
-echo "1. Create Knowledge Base (run: ./scripts/setup-knowledge-base.sh)"
+echo "1. Create Knowledge Base (run: ./scripts/setup-knowledge-base.sh --profile ${AWS_PROFILE:-default})"
 echo "2. Upload company documentation PDFs"
 echo "3. Update Lambda environment variable with Knowledge Base ID"
 echo "4. Deploy frontend (run: ./scripts/deploy-frontend.sh)"
