@@ -1,12 +1,8 @@
 # BidFlow AI
 
-A multi-agent system that converts RFP documents into structured, compliance-aware proposals. The pipeline decomposes the response process into discrete stages — extraction, evidence retrieval, strategy, drafting, and critique — each handled by a purpose-built agent running on Amazon Bedrock.
-
----
-
-## Problem
-
 Responding to enterprise RFPs is slow, error-prone, and expensive. A typical response requires days of cross-functional effort to extract requirements, gather evidence, align on strategy, draft sections, and verify compliance coverage. BidFlow compresses that workflow into an automated pipeline that completes in under a minute.
+
+BidFlow AI is a multi-agent system that converts RFP documents into structured, compliance-aware proposals. The pipeline decomposes the response process into discrete stages - extraction, evidence retrieval, strategy, drafting, and critique - each handled by a purpose-built agent running on Amazon Bedrock.
 
 ## How It Works
 
@@ -20,7 +16,7 @@ A single Lambda function orchestrates five agents in sequence. Each agent receiv
 | 4 | Writer | Claude Sonnet | Draft a seven-section Markdown proposal grounded in the strategy |
 | 5 | Critic | Amazon Nova Lite | Audit the draft against the original checklist; approve or reject with reasoning |
 
-If the Critic rejects, the Writer revises using the feedback, and the Critic re-evaluates once. The final output — along with every intermediate artifact — is persisted to DynamoDB and returned to the caller.
+If the Critic rejects, the Writer revises using the feedback, and the Critic re-evaluates once. The final output - along with every intermediate artifact - is persisted to DynamoDB and returned to the caller.
 
 ---
 
@@ -28,42 +24,42 @@ If the Critic rejects, the Writer revises using the feedback, and the Critic re-
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  Frontend  (Next.js 14 · Static Export · S3 + CloudFront)           │
+│  Frontend  (Next.js 14 · Static Export · S3 + CloudFront)            │
 └────────────────────────────┬─────────────────────────────────────────┘
                              │  HTTPS
                              ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│  API Gateway  (HTTP API · CORS · POST /run · GET /runs/{id})        │
+│  API Gateway  (HTTP API · CORS · POST /run · GET /runs/{id})         │
 └────────────────────────────┬─────────────────────────────────────────┘
                              │  Async invoke
                              ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│  Lambda: AgentOrchestrator  (Python 3.12 · 1 024 MB · 300 s)        │
+│                      Lambda: AgentOrchestrator                       │
 │                                                                      │
-│   ┌───────────┐   ┌────────────┐   ┌────────────┐   ┌───────────┐  │
-│   │ Extractor │──▶│ Researcher │──▶│ Strategist │──▶│  Writer   │  │
-│   │(Nova Lite)│   │  (KB RAG)  │   │  (Claude)  │   │ (Claude)  │  │
-│   └───────────┘   └────────────┘   └────────────┘   └─────┬─────┘  │
-│                                                            │        │
-│                                                            ▼        │
-│                                                      ┌───────────┐  │
-│                                            ┌────────▶│  Critic   │  │
-│                                            │ retry   │(Nova Lite)│  │
-│                                            │ (max 1) └─────┬─────┘  │
-│                                            │               │        │
-│                                            │   REJECT      │APPROVE │
-│                                            └───────────────┘   │    │
-│                                                                ▼    │
-│                                                        Save result  │
+│   ┌───────────┐   ┌────────────┐   ┌────────────┐   ┌───────────┐    │
+│   │ Extractor │──▶│ Researcher │──▶│ Strategist│──▶│  Writer  │    │
+│   │(Nova Lite)│   │  (KB RAG)  │   │  (Claude)  │   │ (Claude)  │    │
+│   └───────────┘   └────────────┘   └────────────┘   └─────┬─────┘    │
+│                                                            │         │ 
+│                                                            ▼         │
+│                                                      ┌───────────┐   │
+│                                            ┌────────▶│  Critic  │    │
+│                                            │ retry   │(Nova Lite)│   │
+│                                            │ (max 1) └─────┬─────┘   │
+│                                            │               │         │
+│                                            │   REJECT      │APPROVE  │
+│                                            └───────────────┘   │     │
+│                                                                ▼     │
+│                                                        Save result   │
 └────────────────────────────────────────────────────┬─────────────────┘
                                                      │
-                    ┌────────────────────────────────┬┘
-                    ▼                                ▼
+                    ┌───────────────────────────────┬┘
+                    ▼                               ▼
          ┌──────────────────┐             ┌──────────────────┐
-         │    DynamoDB       │             │       S3          │
-         │ BidProjectState   │             │ bidflow-documents │
-         │ (run history +    │             │ (company PDFs for │
-         │  all artifacts)   │             │  Knowledge Base)  │
+         │    DynamoDB      │             │       S3         │
+         │ BidProjectState  │             │ bidflow-documents│
+         │ (run history +   │             │ (company PDFs for│
+         │  all artifacts)  │             │  Knowledge Base) │
          └──────────────────┘             └──────────────────┘
 ```
 
@@ -191,68 +187,10 @@ The completed response includes the final proposal Markdown, every intermediate 
 | [`frontend/bidflow-ui/README.md`](frontend/bidflow-ui/README.md) | Frontend development and configuration |
 | [`infra/README.md`](infra/README.md) | CDK stack and infrastructure details |
 
-### 2. RAG Integration
-- Retrieves relevant evidence from Knowledge Base
-- Grounds proposals in real company data
-- Provides proof points and case studies
-
-### 3. Self-Correction Loop
-- Critic agent audits output quality
-- Triggers revision if needed
-- Ensures compliance and completeness
-
-### 4. Model Selection Strategy
-- **Nova 2 Lite** for fast, simple tasks (extraction, auditing)
-- **Claude Sonnet 4.6** for complex reasoning (strategy, writing)
-- Optimizes cost and performance
-
 ---
 
-## 📈 Business Impact
+## License
 
-### Time Savings
-- **Manual:** 2-5 days per proposal
-- **BidFlow:** 40 seconds
-- **Savings:** 99.5% time reduction
-
-### Cost Savings
-- **Manual:** $2,000-$5,000 (consultant fees)
-- **BidFlow:** $0.04 per proposal
-- **Savings:** 99.99% cost reduction
-
-### Quality Improvement
-- Consistent format and tone
-- All requirements addressed
-- Evidence-backed claims
-- Compliance guaranteed
-
----
-
-## 🔮 Future Enhancements
-
-1. **Multi-language Support** - Generate proposals in any language
-2. **Custom Templates** - Industry-specific proposal formats
-3. **Collaboration Features** - Team review and editing
-4. **Analytics Dashboard** - Win rate tracking
-5. **Integration APIs** - Connect to CRM systems
-
----
-
-## 🏆 Why BidFlow Wins
-
-1. **Real Problem** - RFP responses are painful and time-consuming
-2. **Innovative Solution** - Multi-agent architecture with RAG
-3. **Production Ready** - Deployed and working on AWS
-4. **Cost Effective** - $0.04 per proposal vs thousands in manual work
-5. **Scalable** - Serverless architecture handles any load
-6. **Measurable Impact** - 99.5% time savings, 99.99% cost savings
-
----
-
-## 📄 License
-
-MIT License - See LICENSE file for details
-
----
+This repository is licensed under the MIT License. See [`LICENSE`](LICENSE).
 
 **Built with ❤️ using AWS Cloud, Kiro IDE**
