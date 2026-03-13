@@ -32,7 +32,7 @@ flowchart TD
   end
 
   subgraph api[API Layer]
-    gateway[API Gateway HTTP API\nPOST /run\nGET /runs\nGET /runs/{run_id}]
+    gateway[API Gateway HTTP API\nPOST run\nGET runs\nGET run by id]
   end
 
   subgraph app[Application Layer]
