@@ -5,6 +5,8 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as apigatewayv2_integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import { Construct } from 'constructs';
 
 export class BidFlowStack extends cdk.Stack {
@@ -36,15 +38,15 @@ export class BidFlowStack extends cdk.Stack {
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'handler.handler',
       code: lambda.Code.fromAsset('../backend/src'),
-      timeout: cdk.Duration.seconds(60),
+      timeout: cdk.Duration.seconds(300),
       memorySize: 1024,
       environment: {
         REGION: 'us-east-1',
         TABLE_NAME: stateTable.tableName,
         BUCKET_NAME: documentsBucket.bucketName,
-        KNOWLEDGE_BASE_ID: 'PLACEHOLDER',
-        CLAUDE_MODEL_ID: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
-        NOVA_LITE_MODEL_ID: 'amazon.nova-lite-v1:0',
+        KNOWLEDGE_BASE_ID: 'VYJBMMP8PH',
+        CLAUDE_MODEL_ID: 'us.anthropic.claude-sonnet-4-6',
+        NOVA_LITE_MODEL_ID: 'us.amazon.nova-2-lite-v1:0',
       },
     });
 
@@ -54,13 +56,13 @@ export class BidFlowStack extends cdk.Stack {
     // Grant S3 permissions
     documentsBucket.grantReadWrite(orchestratorFn);
 
-    // Grant Bedrock model invocation permissions
+    // Grant Bedrock model invocation permissions (cross-region inference profiles)
     orchestratorFn.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['bedrock:InvokeModel'],
       resources: [
-        `arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20240620-v1:0`,
-        `arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0`,
+        `arn:aws:bedrock:us-east-1::foundation-model/*`,
+        `arn:aws:bedrock:*::inference-profile/*`,
       ],
     }));
 
@@ -69,6 +71,23 @@ export class BidFlowStack extends cdk.Stack {
       effect: iam.Effect.ALLOW,
       actions: ['bedrock-agent-runtime:Retrieve'],
       resources: ['*'],
+    }));
+
+    // Grant AWS Marketplace permissions (required for cross-region inference)
+    orchestratorFn.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'aws-marketplace:ViewSubscriptions',
+        'aws-marketplace:Subscribe',
+      ],
+      resources: ['*'],
+    }));
+
+    // Grant Lambda self-invocation permission (for async execution)
+    orchestratorFn.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['lambda:InvokeFunction'],
+      resources: [`arn:aws:lambda:${this.region}:${this.account}:function:AgentOrchestrator`],
     }));
 
     // API Gateway HTTP API
@@ -107,6 +126,13 @@ export class BidFlowStack extends cdk.Stack {
       integration,
     });
 
+    // GET /runs/{run_id} route
+    httpApi.addRoutes({
+      path: '/runs/{run_id}',
+      methods: [apigatewayv2.HttpMethod.GET],
+      integration,
+    });
+
     // Stack Outputs
     new cdk.CfnOutput(this, 'HttpApiUrl', {
       value: httpApi.url!,
@@ -130,6 +156,39 @@ export class BidFlowStack extends cdk.Stack {
       value: orchestratorFn.functionName,
       description: 'Lambda function name',
       exportName: 'BidFlowLambdaName',
+    });
+
+    // ── Frontend hosting: S3 + CloudFront ──
+
+    const frontendBucket = new s3.Bucket(this, 'FrontendBucket', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+    });
+
+    const distribution = new cloudfront.Distribution(this, 'FrontendDistribution', {
+      defaultBehavior: {
+        origin: new origins.S3Origin(frontendBucket),
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+      },
+      defaultRootObject: 'index.html',
+      errorResponses: [
+        { httpStatus: 403, responseHttpStatus: 200, responsePagePath: '/index.html' },
+        { httpStatus: 404, responseHttpStatus: 200, responsePagePath: '/index.html' },
+      ],
+    });
+
+    new cdk.CfnOutput(this, 'FrontendBucketName', {
+      value: frontendBucket.bucketName,
+      description: 'S3 bucket for frontend static files',
+      exportName: 'BidFlowFrontendBucket',
+    });
+
+    new cdk.CfnOutput(this, 'FrontendUrl', {
+      value: `https://${distribution.distributionDomainName}`,
+      description: 'CloudFront URL for BidFlow frontend',
+      exportName: 'BidFlowFrontendUrl',
     });
   }
 }
